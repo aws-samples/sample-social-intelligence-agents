@@ -1,0 +1,80 @@
+[
+  {
+    "prompt": "Find recent AI developer tool launches on Hacker News and generate outreach emails for prospects with score >= 70",
+    "expected_type": "email_draft",
+    "min_score": 7,
+    "notes": "Core happy path: AI dev tools are high-ICP, recent Show HN posts should surface multiple prospects"
+  },
+  {
+    "prompt": "Discover open-source infrastructure tools launched this week and create personalized outreach for the top 2 prospects",
+    "expected_type": "email_draft",
+    "min_score": 7,
+    "notes": "Open-source infra tools are high-ICP; validates GitHub signal enrichment path"
+  },
+  {
+    "prompt": "Find B2B SaaS products gaining traction on Product Hunt and Reddit, then generate outreach emails",
+    "expected_type": "email_draft",
+    "min_score": 6,
+    "notes": "Multi-source discovery: Product Hunt + Reddit intent signals both required"
+  },
+  {
+    "prompt": "Search for developer tools with competitor frustration signals on Reddit and score them for outreach",
+    "expected_type": "scored_prospect",
+    "min_score": 6,
+    "notes": "Validates intent_signal weighting: competitor_frustration should boost score"
+  },
+  {
+    "prompt": "Find recently funded developer platforms and produce a scored prospect list",
+    "expected_type": "scored_prospect",
+    "min_score": 5,
+    "notes": "Funding events are timing-relevance signals; tests temporal decay logic"
+  },
+  {
+    "prompt": "Discover CLI tools and terminal utilities with active GitHub communities and generate outreach",
+    "expected_type": "email_draft",
+    "min_score": 7,
+    "notes": "High-ICP niche: developer tools with open-source + GitHub signal path"
+  },
+  {
+    "prompt": "Find consumer mobile gaming apps launched this week and score them for AnyCompany outreach",
+    "expected_type": "scored_prospect",
+    "min_score": 2,
+    "notes": "Low-ICP test: consumer-only products should score low (penalty applied); validates ICP fit logic"
+  },
+  {
+    "prompt": "Search for machine learning frameworks on Hacker News with high engagement and generate emails",
+    "expected_type": "email_draft",
+    "min_score": 7,
+    "notes": "ML frameworks are high-ICP; validates HN score weighting and technical buyer persona detection"
+  },
+  {
+    "prompt": "Find products discussed in recommendation-seeking Reddit threads and prioritize by intent signal strength",
+    "expected_type": "scored_prospect",
+    "min_score": 6,
+    "notes": "Validates recommendation_seeking intent signal classification and score boost"
+  },
+  {
+    "prompt": "Discover API-first developer platforms launched in the last 7 days and produce outreach emails with grounding scores",
+    "expected_type": "email_draft",
+    "min_score": 7,
+    "notes": "API-first products are high-ICP; 7-day freshness window tests temporal decay baseline weight"
+  },
+  {
+    "prompt": "Find low-code no-code tools with growing Stack Overflow question volume and score prospects",
+    "expected_type": "scored_prospect",
+    "min_score": 5,
+    "notes": "Stack Overflow demand signal path; low-code tools have mixed ICP fit depending on B2B angle"
+  },
+  {
+    "prompt": "Search for developer security tools and DevSecOps platforms gaining momentum on Lobsters or HN",
+    "expected_type": "email_draft",
+    "min_score": 7,
+    "notes": "Security dev tools are high-ICP; validates Lobsters tool path and security-buyer persona"
+  },
+  {
+    "prompt": "Find database and data engineering tools discussed on dev.to this week and generate outreach",
+    "expected_type": "email_draft",
+    "min_score": 6,
+    "notes": "Data engineering tools are high-ICP; validates dev.to enrichment path"
+  }
+]
