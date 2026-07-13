@@ -1,0 +1,111 @@
+[
+  {
+    "name": "hackernews_trending",
+    "description": "Discover trending stories on Hacker News. Fetches trending stories from the HN Firebase API with optional keyword filtering.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "category": {"type": "string", "description": "Story category: top, new, best, or ask", "default": "top"},
+        "limit": {"type": "integer", "description": "Max stories to return (1-30)", "default": 10},
+        "keyword_filter": {"type": "string", "description": "Optional keyword to filter titles (case-insensitive)", "default": ""}
+      }
+    }
+  },
+  {
+    "name": "youtube_trending",
+    "description": "Search YouTube for trending videos related to a topic, sorted by view count.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["query"],
+      "properties": {
+        "query": {"type": "string", "description": "Search query related to the prospect's domain"},
+        "max_results": {"type": "integer", "description": "Max videos to return (1-10)", "default": 5}
+      }
+    }
+  },
+  {
+    "name": "devto_trending",
+    "description": "Discover trending developer articles from the dev.to Forem API by tag.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "tag": {"type": "string", "description": "Topic tag (e.g. ai, machinelearning, webdev)", "default": "ai"},
+        "time_window": {"type": "integer", "description": "Days to look back (1-365)", "default": 7},
+        "limit": {"type": "integer", "description": "Max articles to return (1-30)", "default": 10}
+      }
+    }
+  },
+  {
+    "name": "wikipedia_summary",
+    "description": "Get a Wikipedia REST API summary for a company, technology, or concept.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["topic"],
+      "properties": {
+        "topic": {"type": "string", "description": "Topic to look up (e.g. Artificial_intelligence)"}
+      }
+    }
+  },
+  {
+    "name": "github_search",
+    "description": "Search GitHub repositories for open-source projects.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["query"],
+      "properties": {
+        "query": {"type": "string", "description": "Search query (e.g. AI agent framework)"},
+        "sort": {"type": "string", "description": "Sort by: stars, forks, or updated", "default": "stars"},
+        "limit": {"type": "integer", "description": "Max repos to return (1-10)", "default": 5}
+      }
+    }
+  },
+  {
+    "name": "lobsters_trending",
+    "description": "Get trending stories from the Lobste.rs JSON API.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "limit": {"type": "integer", "description": "Max stories to return (1-25)", "default": 10}
+      }
+    }
+  },
+  {
+    "name": "producthunt_trending",
+    "description": "Discover trending products on Product Hunt via GraphQL API.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "topic": {"type": "string", "description": "PH topic slug (e.g. artificial-intelligence)", "default": "artificial-intelligence"},
+        "order": {"type": "string", "description": "Sort: VOTES, RANKING, NEWEST, or FEATURED_AT", "default": "VOTES"},
+        "limit": {"type": "integer", "description": "Max posts to return (1-20)", "default": 10}
+      }
+    }
+  },
+  {
+    "name": "reddit_search",
+    "description": "Search Reddit for posts matching a keyword across tech subreddits (SaaS, startups, devtools, selfhosted). Detects buying intent signals like recommendation-seeking, competitor frustration, and purchase intent.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "keyword": {"type": "string", "description": "Keyword to filter posts by (case-insensitive)", "default": ""},
+        "subreddits": {"type": "string", "description": "Comma-separated subreddit names (default: SaaS,startups,devtools,selfhosted,Entrepreneur)", "default": ""},
+        "sort": {"type": "string", "description": "Sort: hot, new, top, or rising", "default": "hot"},
+        "time_filter": {"type": "string", "description": "Time filter for top sort: hour, day, week, month", "default": "week"},
+        "limit": {"type": "integer", "description": "Max posts to return (1-25)", "default": 10}
+      }
+    }
+  },
+  {
+    "name": "stackoverflow_search",
+    "description": "Search Stack Overflow for questions about a technology or topic. Rising question counts indicate growing market demand. Unanswered questions signal unmet needs.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["query"],
+      "properties": {
+        "query": {"type": "string", "description": "Search query (e.g. AI agent framework, vector database)"},
+        "sort": {"type": "string", "description": "Sort by: activity, votes, creation, relevance", "default": "relevance"},
+        "limit": {"type": "integer", "description": "Max questions to return (1-20)", "default": 10}
+      }
+    }
+  }
+]

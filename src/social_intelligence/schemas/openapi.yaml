@@ -1,0 +1,337 @@
+openapi: "3.0.3"
+info:
+  title: Social Intelligence Tools API
+  description: |
+    External API proxy for the social intelligence multi-agent system.
+    Each path maps to one tool that agents can invoke via Amazon Bedrock AgentCore Gateway.
+    This spec is the single source of truth for tool contracts: it drives
+    Amazon Bedrock AgentCore Gateway tool discovery, Amazon API Gateway request validation,
+    and documentation.
+  version: "1.0.0"
+  license:
+    name: MIT No Attribution
+    url: https://opensource.org/license/mit-0
+
+security:
+  - sigv4: []
+
+components:
+  securitySchemes:
+    sigv4:
+      type: apiKey
+      name: Authorization
+      in: header
+      description: AWS SigV4 IAM authentication required on all endpoints.
+
+paths:
+  /tools/hackernews:
+    post:
+      operationId: hackernews_trending
+      summary: Discover trending stories on Hacker News
+      description: Fetches trending stories from the HN Firebase API with optional keyword filtering.
+      security:
+        - sigv4: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                category:
+                  type: string
+                  description: "Story category: top, new, best, or ask"
+                  default: "top"
+                limit:
+                  type: integer
+                  description: "Max stories to return (1-30)"
+                  default: 10
+                keyword_filter:
+                  type: string
+                  description: "Optional keyword to filter titles (case-insensitive)"
+                  default: ""
+      responses:
+        "200":
+          description: Trending stories
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stories:
+                    type: array
+                    maxItems: 30
+                    items:
+                      type: object
+                  category:
+                    type: string
+                  count:
+                    type: integer
+
+  /tools/youtube:
+    post:
+      operationId: youtube_trending
+      summary: Search YouTube for trending videos
+      description: Searches YouTube Data API v3 for videos related to a topic, sorted by view count.
+      security:
+        - sigv4: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query:
+                  type: string
+                  description: "Search query related to the prospect's domain"
+                max_results:
+                  type: integer
+                  description: "Max videos to return (1-10)"
+                  default: 5
+      responses:
+        "200":
+          description: Trending videos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  videos:
+                    type: array
+                    maxItems: 10
+                    items:
+                      type: object
+                  query:
+                    type: string
+
+  /tools/devto:
+    post:
+      operationId: devto_trending
+      summary: Discover trending articles on dev.to
+      description: Fetches trending developer articles from the dev.to Forem API by tag.
+      security:
+        - sigv4: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tag:
+                  type: string
+                  description: "Topic tag (e.g. ai, machinelearning, webdev)"
+                  default: "ai"
+                time_window:
+                  type: integer
+                  description: "Days to look back (1-365)"
+                  default: 7
+                limit:
+                  type: integer
+                  description: "Max articles to return (1-30)"
+                  default: 10
+      responses:
+        "200":
+          description: Trending articles
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /tools/wikipedia:
+    post:
+      operationId: wikipedia_summary
+      summary: Get a Wikipedia summary for a topic
+      description: Fetches the Wikipedia REST API summary for a company, technology, or concept.
+      security:
+        - sigv4: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [topic]
+              properties:
+                topic:
+                  type: string
+                  description: "Topic to look up (e.g. Artificial_intelligence)"
+      responses:
+        "200":
+          description: Wikipedia summary
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /tools/github:
+    post:
+      operationId: github_search
+      summary: Search GitHub repositories
+      description: Searches the GitHub Search API for open-source projects.
+      security:
+        - sigv4: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query:
+                  type: string
+                  description: "Search query (e.g. AI agent framework)"
+                sort:
+                  type: string
+                  description: "Sort by: stars, forks, or updated"
+                  default: "stars"
+                limit:
+                  type: integer
+                  description: "Max repos to return (1-10)"
+                  default: 5
+      responses:
+        "200":
+          description: GitHub repositories
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /tools/lobsters:
+    post:
+      operationId: lobsters_trending
+      summary: Get trending stories from Lobste.rs
+      description: Fetches hottest stories from the Lobste.rs JSON API.
+      security:
+        - sigv4: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                limit:
+                  type: integer
+                  description: "Max stories to return (1-25)"
+                  default: 10
+      responses:
+        "200":
+          description: Trending stories
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /tools/producthunt:
+    post:
+      operationId: producthunt_trending
+      summary: Discover trending products on Product Hunt
+      description: Queries the Product Hunt GraphQL API for trending product launches.
+      security:
+        - sigv4: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                topic:
+                  type: string
+                  description: "PH topic slug (e.g. artificial-intelligence, developer-tools)"
+                  default: "artificial-intelligence"
+                order:
+                  type: string
+                  description: "Sort: VOTES, RANKING, NEWEST, or FEATURED_AT"
+                  default: "VOTES"
+                limit:
+                  type: integer
+                  description: "Max posts to return (1-20)"
+                  default: 10
+      responses:
+        "200":
+          description: Product Hunt posts
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /tools/reddit:
+    post:
+      operationId: reddit_search
+      summary: Search Reddit for buying-intent posts
+      description: Searches Reddit JSON API for posts matching a keyword across tech subreddits. Detects buying intent signals.
+      security:
+        - sigv4: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                keyword:
+                  type: string
+                  description: "Keyword to filter posts by (case-insensitive)"
+                  default: ""
+                subreddits:
+                  type: string
+                  description: "Comma-separated subreddit names"
+                  default: ""
+                sort:
+                  type: string
+                  description: "Sort: hot, new, top, or rising"
+                  default: "hot"
+                time_filter:
+                  type: string
+                  description: "Time filter: hour, day, week, month"
+                  default: "week"
+                limit:
+                  type: integer
+                  description: "Max posts to return (1-25)"
+                  default: 10
+      responses:
+        "200":
+          description: Reddit posts with intent signals
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /tools/stackoverflow:
+    post:
+      operationId: stackoverflow_search
+      summary: Search Stack Overflow questions
+      description: Searches the Stack Exchange API for questions about a technology or topic. Rising question counts indicate growing market demand.
+      security:
+        - sigv4: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query:
+                  type: string
+                  description: "Search query (e.g. AI agent framework, vector database)"
+                sort:
+                  type: string
+                  description: "Sort by: activity, votes, creation, relevance"
+                  default: "relevance"
+                limit:
+                  type: integer
+                  description: "Max questions to return (1-20)"
+                  default: 10
+      responses:
+        "200":
+          description: Stack Overflow questions
+          content:
+            application/json:
+              schema:
+                type: object
