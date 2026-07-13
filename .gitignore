@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+.venv/
+
+# AgentCore build artifacts
+.bedrock_agentcore/
+
+# AgentCore config (contains environment-specific paths and account IDs)
+.bedrock_agentcore.yaml
+
+# CDK
+cdk.out/
+infra/lambda/.bundle/
+.agent_bundle/
+
+# Node (CDK CLI + Playwright testing)
+node_modules/
+package.json
+package-lock.json
+test-results/
+
+# IDE / AI assistants
+.idea/
+.vscode/
+.claude/
+.kiro/
+*.swp
+*.swo
+
+# Keys
+*.pem
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Blog content (separate publishing workflow)
+blog/
+blog-post.md
+
+# Linting/audit artifacts
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+licenses.csv
+temp_scan/
+.holmes/
+.holmesignore
+benchmark_results.csv
+
+# Gateway config (contains environment-specific values)
+gateway_config.json
+
+# Streamlit local config (user-specific theme/server settings)
+.streamlit/
+
+# Environment
+.env
+.env.local

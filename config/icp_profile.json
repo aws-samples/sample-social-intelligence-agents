@@ -1,0 +1,14 @@
+{
+  "_comment": "AnyCompany Ideal Customer Profile — loaded by analysis_agent at runtime. Edit this file to update ICP criteria without changing agent code. Keep high_fit/low_fit item text concise (displayed verbatim in the system prompt). score_bonus and score_penalty are integer adjustments to the 0-100 prospect score.",
+  "high_fit": [
+    "Developer tool or SaaS product",
+    "Active open-source presence with growing community",
+    "Recently launched or in growth phase",
+    "B2B focus with technical buyer persona"
+  ],
+  "low_fit": [
+    "Consumer-only product with no developer angle"
+  ],
+  "score_bonus": 10,
+  "score_penalty": 10
+}
