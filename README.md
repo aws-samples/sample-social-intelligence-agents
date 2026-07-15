@@ -326,6 +326,8 @@ For long runs, invoke with `{"background": true}`: the runtime executes the pipe
 
 The Swarm pattern lets each agent choose its own handoff target via `handoff_to_agent()`. Agents pass complete `TrendData`, `EnrichmentData`, and scored evidence through explicit handoff context, so downstream stages never depend on hidden tool-call history. The expected route is research → search → analysis → email; optional re-query and loopback remain possible within hard limits. Safety knobs (`max_handoffs=5`, `max_iterations=6`, `execution_timeout=1200s`, `node_timeout=960s` by default, and repetitive-handoff detection over a window of 3 with 3 minimum unique agents) bound the run.
 
+When a Swarm run violates its output contract, persists no scores, or fails mid-run (for example, a Bedrock model throttle that outlasts the retry budget), the runtime falls back to the deterministic Graph pattern for the same prompt and emits a `swarm_recovery` event. Concurrency note: Bedrock enforces a per-second `ApplyGuardrail` quota, and every guardrail-inline `Converse` call consumes it. Run evaluations serially (`EVAL_CONCURRENCY=1`) or request a quota increase before driving many concurrent guardrail-enabled runs, otherwise throttling can trigger Swarm recovery.
+
 ## Tool Architecture
 
 ```text

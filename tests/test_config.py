@@ -64,7 +64,10 @@ def test_guardrail_kwargs_generate_a_single_inline_converse_configuration(monkey
 
 
 def test_analysis_output_budget_has_a_safe_default() -> None:
-    assert ANALYSIS_MAX_TOKENS == 4096
+    # The analysis agent emits the largest structured output (ScoredProspectList with a
+    # per-prospect score_breakdown). 4096 truncated it and raised MaxTokensReachedException,
+    # so the default must leave room for the full typed contract.
+    assert ANALYSIS_MAX_TOKENS == 8192
     assert SEARCH_MAX_TOKENS == 8192
     assert TREND_MAX_TOKENS == 8192
     assert ORCHESTRATION_NODE_TIMEOUT_SECONDS == 960

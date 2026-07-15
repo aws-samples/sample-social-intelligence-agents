@@ -1032,6 +1032,122 @@ class TestEntrypointDiagnostics:
         ]
         assert events[1]["fallback_pattern"] == "graph"
 
+    def test_swarm_midrun_failure_recovers_via_graph(self):
+        """A Swarm node crash (for example, model throttling) falls back to Graph."""
+        from contextlib import contextmanager
+
+        from strands.multiagent.base import Status
+
+        class _CrashingSwarm:
+            async def stream_async(self, _prompt):
+                yield {"type": "multiagent_node_start", "node_id": "trend_researcher"}
+                raise RuntimeError("ModelThrottledException: ApplyGuardrail limit exceeded")
+
+        class _Graph:
+            async def stream_async(self, _prompt):
+                yield {"type": "multiagent_node_start", "node_id": "research"}
+                yield {"type": "multiagent_result", "result": SimpleNamespace(status=Status.COMPLETED)}
+
+        @contextmanager
+        def gateway_tools():
+            yield {"trend": [], "enrichment": [], "email": []}
+
+        async def collect_events():
+            return [
+                event
+                async for event in self.ep._run_pipeline(
+                    "find prospects",
+                    "swarm",
+                    session_manager=None,
+                    include_scored_prospects=False,
+                )
+            ]
+
+        with patch.object(self.ep, "_gateway_tools", gateway_tools):
+            with patch.object(self.ep, "_build_orchestrator", return_value=_CrashingSwarm()):
+                with patch.object(self.ep, "_build_graph", return_value=_Graph()):
+                    events = asyncio.run(collect_events())
+
+        types = [event["type"] for event in events]
+        assert "swarm_recovery" in types
+        assert types[-1] == "multiagent_result"
+        recovery = next(event for event in events if event["type"] == "swarm_recovery")
+        assert recovery["fallback_pattern"] == "graph"
+        # A mid-run crash with no persisted scores reports the missing-handoff reason;
+        # what matters is that the crash routes into Graph recovery rather than failing
+        # the whole run. The explicit crash reason is used when scores were persisted.
+        assert recovery["reason"]
+
+    def test_swarm_crash_after_clean_metrics_reports_execution_error(self):
+        """A crash when output invariants already hold uses the explicit crash reason."""
+        from contextlib import contextmanager
+
+        from strands.multiagent.base import Status
+
+        class _CrashingSwarm:
+            async def stream_async(self, _prompt):
+                yield {"type": "multiagent_node_start", "node_id": "email_generator"}
+                raise RuntimeError("ModelThrottledException: ApplyGuardrail limit exceeded")
+
+        class _Graph:
+            async def stream_async(self, _prompt):
+                yield {"type": "multiagent_result", "result": SimpleNamespace(status=Status.COMPLETED)}
+
+        @contextmanager
+        def gateway_tools():
+            yield {"trend": [], "enrichment": [], "email": []}
+
+        async def collect_events():
+            return [
+                event
+                async for event in self.ep._run_pipeline(
+                    "find prospects",
+                    "swarm",
+                    session_manager=None,
+                    include_scored_prospects=False,
+                )
+            ]
+
+        # Force the metrics-based reason to be clean so the explicit crash reason is used.
+        with patch.object(self.ep, "_gateway_tools", gateway_tools):
+            with patch.object(self.ep, "_build_orchestrator", return_value=_CrashingSwarm()):
+                with patch.object(self.ep, "_build_graph", return_value=_Graph()):
+                    with patch.object(self.ep, "_swarm_recovery_reason", return_value=None):
+                        events = asyncio.run(collect_events())
+
+        recovery = next(event for event in events if event["type"] == "swarm_recovery")
+        assert "failed before completion" in recovery["reason"]
+        assert events[-1]["type"] == "multiagent_result"
+
+    def test_graph_midrun_failure_is_not_swallowed(self):
+        """The Graph pattern has no recovery, so a mid-run failure must propagate."""
+        from contextlib import contextmanager
+
+        class _CrashingGraph:
+            async def stream_async(self, _prompt):
+                yield {"type": "multiagent_node_start", "node_id": "research"}
+                raise RuntimeError("graph node failed")
+
+        @contextmanager
+        def gateway_tools():
+            yield {"trend": [], "enrichment": [], "email": []}
+
+        async def collect_events():
+            return [
+                event
+                async for event in self.ep._run_pipeline(
+                    "find prospects",
+                    "graph",
+                    session_manager=None,
+                    include_scored_prospects=False,
+                )
+            ]
+
+        with patch.object(self.ep, "_gateway_tools", gateway_tools):
+            with patch.object(self.ep, "_build_orchestrator", return_value=_CrashingGraph()):
+                with pytest.raises(RuntimeError, match="graph node failed"):
+                    asyncio.run(collect_events())
+
     def test_swarm_valid_empty_analysis_emits_its_terminal_result(self):
         """A completed, explicitly empty analysis is not retried as a missing handoff."""
         from contextlib import contextmanager

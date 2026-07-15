@@ -98,7 +98,7 @@ and grounding options to match your production policy.
 | TS008 | Guardrail bypass outside the CDK deployment | Medium | The CDK deployment creates a guardrail and injects its ID/version into the Runtime. A standalone deployment must set both variables; add CloudWatch alarms on guardrail filter hits |
 | TS009 | DynamoDB scan/query abuse | Medium | Product-name and recency lookups use GSIs, not scans; input limits bound query requests and the runtime role grants only the table APIs required for reads and writes |
 | TS010 | API Gateway throttling bypass | Low | Throttling (50 req/s, 100 burst); add AWS WAF on API Gateway for distributed abuse |
-| TS011 | Lambda timeout / cost abuse | Low | Lambda 60s timeout; AgentCore lifecycle limits (15 min idle, 8 hr max); node/execution timeouts in the orchestrator |
+| TS011 | Lambda timeout / cost abuse | Low | Lambda 60s timeout; AgentCore lifecycle limits (15 min idle, 8 hr max); node/execution timeouts in the orchestrator; bounded transient-model retry and per-agent tool-call budgets. Bedrock enforces a per-second `ApplyGuardrail` quota that every guardrail-inline Converse call consumes; drive concurrent runs within that quota or request an increase |
 | TS012 | Credential exposure via CloudWatch | Low | Tool handlers return `upstream_error` (no `str(e)`); skip-list logs counts only; secret values not logged |
 | TS013 | Sensitive prompt or evidence exposure in observability data | Medium | Strands and AgentCore telemetry is limited to CloudWatch IAM principals; do not put credentials or sensitive personal data in prompts, evidence, or tool results; application and usage log retention is 90 days |
 

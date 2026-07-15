@@ -174,11 +174,17 @@ def search_specialist_tool_budget() -> ToolCallBudget:
 
 
 def analysis_tool_budget() -> ToolCallBudget:
-    """Return the single-write budget for the swarm analysis handoff."""
+    """Return the score-persistence budget for the swarm analysis handoff.
+
+    Allow one schema self-correction: the analyst reliably issues a first
+    persist_scored_prospects call, and if the payload fails the ScoreBreakdown or
+    icp_adjustment contract it corrects and resubmits once. A hard cap of one call
+    silently drops every swarm score row when that correction is needed.
+    """
     return ToolCallBudget(
         agent_name="analyst",
-        max_total_calls=1,
-        max_calls_per_tool={"persist_scored_prospects": 1},
+        max_total_calls=2,
+        max_calls_per_tool={"persist_scored_prospects": 2},
         default_per_tool_limit=0,
     )
 

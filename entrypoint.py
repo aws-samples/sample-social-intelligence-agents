@@ -716,31 +716,44 @@ async def _run_pipeline(prompt: str, pattern: str, session_manager, include_scor
     with _gateway_tools() as tools:
         orchestrator = _build_orchestrator(pattern, tools, session_manager)
         deferred_swarm_result = None
-        async for event in orchestrator.stream_async(prompt):
-            _log_pipeline_event(event)
-            analysis_scores = _analysis_scores_event(event)
-            if analysis_scores is not None:
-                # Persist before yielding the node-stop event. A client may disconnect
-                # immediately after receiving it, but the score rows must remain durable.
-                persisted = persist_analysis_scores(analysis_scores["prospects"])
-                logger.info("Persisted %d analysis score record(s) for the run", persisted)
-            if _event_type(event) == "multiagent_result":
-                _require_completed_result(event, pattern)
-                if pattern == "swarm":
-                    # Do not let a no-op Swarm terminal event end the response stream
-                    # before output invariants are checked below.
-                    deferred_swarm_result = event
-                    continue
-            yield event
-            if analysis_scores is not None and include_scored_prospects:
-                yield analysis_scores
+        swarm_execution_error: Exception | None = None
+        try:
+            async for event in orchestrator.stream_async(prompt):
+                _log_pipeline_event(event)
+                analysis_scores = _analysis_scores_event(event)
+                if analysis_scores is not None:
+                    # Persist before yielding the node-stop event. A client may disconnect
+                    # immediately after receiving it, but the score rows must remain durable.
+                    persisted = persist_analysis_scores(analysis_scores["prospects"])
+                    logger.info("Persisted %d analysis score record(s) for the run", persisted)
+                if _event_type(event) == "multiagent_result":
+                    _require_completed_result(event, pattern)
+                    if pattern == "swarm":
+                        # Do not let a no-op Swarm terminal event end the response stream
+                        # before output invariants are checked below.
+                        deferred_swarm_result = event
+                        continue
+                yield event
+                if analysis_scores is not None and include_scored_prospects:
+                    yield analysis_scores
+        except Exception as exc:
+            # A Swarm node can fail mid-run (for example, Bedrock model throttling that
+            # outlasts the retry budget) and never emit a terminal result. Route that into
+            # the same deterministic Graph recovery below instead of failing the whole run.
+            # The Graph pattern has no comparable recovery, so its errors still surface.
+            if pattern != "swarm":
+                raise
+            swarm_execution_error = exc
+            logger.warning("Swarm execution failed before a terminal result: %s", exc, exc_info=True)
 
         if pattern == "swarm":
-            if deferred_swarm_result is None:
-                raise RuntimeError("swarm orchestration ended without a terminal result event")
             recovery_reason = _swarm_recovery_reason()
-            if recovery_reason is None:
+            if recovery_reason is None and swarm_execution_error is not None:
+                recovery_reason = f"swarm execution failed before completion: {swarm_execution_error}"
+            if deferred_swarm_result is not None and recovery_reason is None:
                 yield deferred_swarm_result
+            elif recovery_reason is None:
+                raise RuntimeError("swarm orchestration ended without a terminal result event")
             else:
                 # Snapshot the Swarm-phase counters before the Graph fallback re-runs
                 # persistence on the same run-scoped state, so the recovery event and the
