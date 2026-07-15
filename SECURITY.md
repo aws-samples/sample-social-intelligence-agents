@@ -9,7 +9,7 @@ Please do **not** create a public GitHub issue.
 
 ## Architecture
 
-```
+```text
 Streamlit UI (demo/app.py)
     |
     | HTTPS/TLS 1.2+ (SigV4-signed)
@@ -28,7 +28,7 @@ AWS Lambda  (shared tool handlers)
     v
 External APIs  (HN, YouTube, dev.to, Reddit, GitHub, etc.)
 
-Amazon DynamoDB  <-- AgentCore Runtime (lead storage)
+Amazon DynamoDB  <-- AgentCore Runtime (leads, score rows, frontier claims)
 AWS Secrets Manager  <-- Lambda only (CMK-encrypted API keys)
 ```
 
@@ -42,7 +42,7 @@ AWS Secrets Manager  <-- Lambda only (CMK-encrypted API keys)
    Product Hunt, GitHub token, Reddit OAuth2). The CDK stack creates these
    secrets empty and CMK-encrypted under the `social-intel/` prefix. Operators
    populate values post-deploy via `aws secretsmanager put-secret-value`. The `_secrets` helper retrieves values
-   at invocation time, never logs the value, fails closed (errors are not cached
+   at invocation time, does not log the value, fails closed (errors are not cached
    and degrade to the unauthenticated path), and caches for a short, env-tunable
    TTL (`SECRET_CACHE_TTL_SECONDS`, default 600s). Enable automatic rotation via
    `aws secretsmanager rotate-secret` for production.
@@ -51,10 +51,14 @@ AWS Secrets Manager  <-- Lambda only (CMK-encrypted API keys)
    - Lambda: `secret.grant_read(...)` per secret (exact ARNs, plus `kms:Decrypt`
      on the CMK). The credential-consuming tools run in this Lambda, so it is the
      only role with secret access.
-   - AgentCore Runtime: `bedrock:InvokeModel*` on the specific inference profile
-     ARN, `dynamodb:*` (scoped) on the leads/frontier table ARNs, scoped Memory
-     read/write, and `bedrock:ApplyGuardrail` on the guardrail ARN. The Runtime
-     role has NO Secrets Manager access (it reads no secrets).
+   - AgentCore Runtime: `bedrock:InvokeModel` and
+     `bedrock:InvokeModelWithResponseStream` for the configured Claude profiles,
+     explicit DynamoDB read/write actions plus `dynamodb:TransactWriteItems` on
+     the leads/frontier tables, scoped Memory read/write, and
+     inline Bedrock Guardrails through its Converse model calls. Converse still requires
+     `bedrock:ApplyGuardrail`, scoped to the exact CDK-created guardrail ARN; it does not
+     make a separate `ApplyGuardrail` API call. The Runtime role has no Secrets Manager
+     access (it reads no secrets).
    - API Gateway: IAM authorization required on all methods.
 
 4. **Encryption at rest** -- The DynamoDB leads and frontier tables AND the four
@@ -66,9 +70,10 @@ AWS Secrets Manager  <-- Lambda only (CMK-encrypted API keys)
    validation enabled (`verify=True` is the default). The shared
    `_http.get_with_retry()` helper enforces HTTPS for all outbound requests.
 
-6. **Network security** -- AgentCore Runtime uses public network access because
-   agents require internet access for external API calls. For deployments
-   requiring network isolation, use VPC configuration with NAT gateways:
+6. **Network security** -- AgentCore Runtime is configured for public network
+   access to reach the AgentCore Gateway; the Lambda tool handlers make the
+   external API calls. For deployments requiring network isolation, use VPC
+   configuration with NAT gateways:
    `network_configuration=agentcore.RuntimeNetworkConfiguration.using_vpc(...)`.
 
 7. **Input validation** -- All tool handlers validate and sanitize inputs
@@ -77,26 +82,25 @@ AWS Secrets Manager  <-- Lambda only (CMK-encrypted API keys)
 
 ## Threat Model
 
-A formal threat model generated with ThreatForest (MITRE ATT&CK + ATLAS) covers
-12 threats, 14 attack trees, 157 TTP mappings, and 86 mitigations. The table below
-maps each threat to its in-repo control. Several controls are opt-in via environment
-variables so the default deployment matches the companion blog; enable them for
-production.
+The table below maps the primary threats for this sample to in-repo controls.
+Several controls are configurable through environment variables; set the email review
+and grounding options to match your production policy.
 
 | ID | Threat | Severity | Mitigation in this repo |
 |---|---|---|---|
 | TS001 | Prompt injection to the Bedrock agent | High | `SAFETY_FENCE` untrusted-data framing on all four agents; Bedrock Guardrail (`GUARDRAIL_ID`/`GUARDRAIL_VERSION`) with an InstructionOverride deny-topic. The PROMPT_ATTACK content filter is intentionally not used: it blocked benign multi-step task prompts and the agents' own injection fence; the deny-topic blocks real jailbreaks without that false-positive |
 | TS002 | IAM privilege escalation via wildcards | High | Scoped IAM (inference-profile ARN, table ARNs, secret ARNs); scoped AgentCore Memory grant (read/write, no delete); CDK-nag suppressions documented |
-| TS003 | SSRF to the AWS metadata endpoint | High | `_http.py` outbound host allow-list rejects any host outside the nine source-API domains, including `169.254.169.254`. Residual: the allow-list matches hostnames, not resolved IPs, so DNS rebinding is a known residual; the AgentCore runtime uses IMDSv2 (token-required), which blunts metadata theft |
+| TS003 | SSRF to the AWS metadata endpoint | High | `_http.py` outbound host allow-list rejects any host outside the nine source-API domains, including `169.254.169.254`. Residual: the allow-list matches hostnames, not resolved IPs, so DNS rebinding remains a known risk |
 | TS004 | Rotated-secret reuse via cache TTL | High | CMK-encrypted secrets; `grant_read` per-secret (exact ARN + `kms:Decrypt`), no `ListSecrets`; Lambda-only access (Runtime has none); cache TTL 10 min, env-tunable via `SECRET_CACHE_TTL_SECONDS`; fail-closed (errors not cached) |
 | TS005 | Unsolicited email without review | Medium | Optional human-in-the-loop (`EMAIL_APPROVAL_REQUIRED=true` stores leads as `pending_review`); compliance footer (`COMPLIANCE_FOOTER_REQUIRED`) |
-| TS006 | Data poisoning from external APIs | Medium | Tool output treated as untrusted data; grounding gate (`grounding_gate.py`) verifies email claims against evidence; `GROUNDING_MIN_SCORE` blocks low-grounding leads |
-| TS007 | Frontier dedup race condition | Medium | `claim_url` uses a DynamoDB conditional write (`attribute_not_exists`); `store_lead` uses an atomic conditional write on `prospect_id` |
-| TS008 | Guardrail bypass when unconfigured | Medium | Guardrail is opt-in by design; enable in production and add CloudWatch alarms on guardrail filter hits |
-| TS009 | DynamoDB scan/query abuse | Medium | Product-name lookups use the GSI, not scans; restrict the runtime role to Query-only in production |
+| TS006 | Data poisoning from external APIs | Medium | Tool output treated as untrusted data; email persistence requires at least two distinct supported sources, `grounding_gate.py` verifies email claims against evidence, and `GROUNDING_MIN_SCORE` blocks low-grounding leads |
+| TS007 | Frontier dedup race condition | Medium | `claim_url` uses a DynamoDB conditional write (`attribute_not_exists`); `store_lead` uses one DynamoDB transaction to reserve stable product-name and prospect-ID markers with the lead record |
+| TS008 | Guardrail bypass outside the CDK deployment | Medium | The CDK deployment creates a guardrail and injects its ID/version into the Runtime. A standalone deployment must set both variables; add CloudWatch alarms on guardrail filter hits |
+| TS009 | DynamoDB scan/query abuse | Medium | Product-name and recency lookups use GSIs, not scans; input limits bound query requests and the runtime role grants only the table APIs required for reads and writes |
 | TS010 | API Gateway throttling bypass | Low | Throttling (50 req/s, 100 burst); add AWS WAF on API Gateway for distributed abuse |
 | TS011 | Lambda timeout / cost abuse | Low | Lambda 60s timeout; AgentCore lifecycle limits (15 min idle, 8 hr max); node/execution timeouts in the orchestrator |
-| TS012 | Credential exposure via CloudWatch | Low | Tool handlers return `upstream_error` (no `str(e)`); skip-list logs counts only; secret values never logged |
+| TS012 | Credential exposure via CloudWatch | Low | Tool handlers return `upstream_error` (no `str(e)`); skip-list logs counts only; secret values not logged |
+| TS013 | Sensitive prompt or evidence exposure in observability data | Medium | Strands and AgentCore telemetry is limited to CloudWatch IAM principals; do not put credentials or sensitive personal data in prompts, evidence, or tool results; application and usage log retention is 90 days |
 
 ## Data Classification
 
@@ -104,26 +108,30 @@ production.
 |---|---|---|---|
 | RESTRICTED | API keys, authentication tokens | AWS Secrets Manager | Customer-managed KMS key, scoped `grant_read` IAM, rotation-ready |
 | CONFIDENTIAL | Prospect data, email drafts, scores | Amazon DynamoDB | Customer-managed KMS key, TTL expiry, scoped IAM |
-| INTERNAL | Aggregated analytics, agent logs | Amazon CloudWatch Logs | Log group retention (1 week), IAM access |
-| PUBLIC | Tool schemas, OpenAPI specs | Source code repository | Version control, code review |
+| CONFIDENTIAL | Prompts, source evidence, agent telemetry | Amazon CloudWatch Logs / AgentCore spans | IAM access, Runtime application and usage log retention (90 days), CloudWatch Transaction Search |
+| PUBLIC | Tool schemas | Source code repository | Version control, code review |
 
 ## Security Guidelines by AWS Service
 
 - **AWS Lambda**: Least-privilege execution role, ARM64 runtime, 60s timeout,
-  512 MB memory cap, dedicated CloudWatch log group with 1-week retention.
+  512 MB memory cap, dedicated CloudWatch log group with one-month retention.
 - **Amazon API Gateway**: IAM authentication on all methods, request validation
   enabled, throttling configured, access logging to CloudWatch.
 - **Amazon Bedrock AgentCore Gateway**: IAM inbound authorization, MCP protocol
   for tool discovery, Lambda target integration.
 - **Amazon Bedrock AgentCore Runtime**: IAM authorization, public network (see
-  network security above), lifecycle limits, scoped Bedrock model access.
+  network security above), lifecycle limits, scoped Bedrock model access,
+  `tracing_enabled`, and application/usage log delivery. Strands emits
+  OpenTelemetry telemetry natively and AgentCore Runtime exports it; CloudWatch
+  Transaction Search is an account-level prerequisite for span search.
 - **Amazon DynamoDB**: Customer-managed KMS key encryption, TTL expiry, scoped
   IAM policies (no `dynamodb:*` wildcards), table-level resource ARN restrictions.
 - **AWS Secrets Manager**: CDK-created CMK-encrypted secrets, per-secret
   `grant_read` (exact ARN + `kms:Decrypt`), no `ListSecrets` or admin actions,
   Lambda-only access (Runtime role has none).
-- **Amazon CloudWatch Logs**: Dedicated log groups, 1-week retention policy,
-  `DESTROY` removal policy for non-production.
+- **Amazon CloudWatch Logs**: Lambda and API access-log groups use a one-month retention policy;
+  Runtime application and usage groups use a 90-day retention policy. Access to
+  AgentCore and Strands telemetry must be treated as access to confidential prompt and evidence data.
 
 ## Shared Responsibility Model
 
@@ -153,12 +161,14 @@ Run these scans before deployment:
 pip install bandit
 bandit -r src/ infra/lambda/ -c pyproject.toml
 
-# Dependency audit
+# Dependency audit: install with the infra extra so CDK dependencies are included
 pip install pip-audit
-pip-audit -r requirements.txt
+pip-audit
 
 # CDK security checks (runs automatically during cdk synth)
+cd infra
 cdk synth  # cdk-nag is configured in the CDK app
+cd ..
 
 # Semgrep (optional)
 semgrep --config auto src/ infra/
@@ -202,7 +212,7 @@ behind the Gateway**, which has no workload context. Adopting Identity therefore
 requires either moving those tools into the Runtime (changing the documented
 Gateway/Lambda topology) or fetching a workload token explicitly in the Lambda.
 Until then, the CMK-encrypted, least-privilege, fail-closed Secrets Manager path
-is the secure baseline. To migrate: create credential providers with
+is the hardened baseline. To migrate: create credential providers with
 `agentcore add credential` (never the MCP create/update tools, which would route
 secrets through an LLM), reference them in `agentcore.json`, and decorate the
 runtime-side tool functions.

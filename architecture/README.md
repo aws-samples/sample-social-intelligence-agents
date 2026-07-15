@@ -13,8 +13,9 @@ Editable [draw.io](https://www.drawio.com/) sources and rendered PNGs for the di
 Open a `.drawio` file in the [draw.io desktop app](https://www.drawio.com/) and export to PNG, or use the CLI:
 
 ```bash
-drawio --export --format png --scale 2 --border 10 \
-  --output architecture-overview.png architecture-overview.drawio
+drawio --export --format png --scale 2 --border 10 --output architecture-overview.png architecture-overview.drawio
+drawio --export --format png --scale 2 --border 10 --output graph-pattern.png graph-pattern.drawio
+drawio --export --format png --scale 2 --border 10 --output swarm-pattern.png swarm-pattern.drawio
 ```
 
 Diagrams use the AWS Architecture Icons (`mxgraph.aws4`) shape library, which draw.io bundles by default.

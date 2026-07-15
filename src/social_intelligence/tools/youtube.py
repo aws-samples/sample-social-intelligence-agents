@@ -1,6 +1,7 @@
 """YouTube Data API v3: collects trending video data."""
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 from ._freshness import freshness_weight
@@ -8,6 +9,7 @@ from ._http import get_with_retry
 from ._secrets import get_secret
 
 logger = logging.getLogger(__name__)
+_YOUTUBE_API_KEY_PATTERN = re.compile(r"^AIza[0-9A-Za-z_-]{35}$")
 
 
 def _recent_cutoff(days: int = 90) -> str:
@@ -36,7 +38,16 @@ def handle(params: dict) -> dict:
     query = str(params.get("query", ""))[:500]
     max_results = max(1, min(int(params.get("max_results", 5)), 10))
 
-    api_key = get_secret("social-intel/youtube-api-key")
+    try:
+        api_key = get_secret("social-intel/youtube-api-key").strip()
+    except Exception:
+        logger.info("YouTube API key secret unavailable; skipping YouTube enrichment")
+        return {"videos": [], "query": query, "count": 0, "source": "YouTube", "error": "not_configured"}
+    if not _YOUTUBE_API_KEY_PATTERN.fullmatch(api_key):
+        # The stack creates a random bootstrap secret. It is not a Google API key
+        # and must not be sent to the API as though it were one.
+        logger.info("YouTube API key is not configured; skipping YouTube enrichment")
+        return {"videos": [], "query": query, "count": 0, "source": "YouTube", "error": "not_configured"}
 
     try:
         search_resp = get_with_retry(

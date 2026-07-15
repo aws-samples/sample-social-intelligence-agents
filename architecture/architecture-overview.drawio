@@ -18,11 +18,11 @@
 <mxCell id="memory" value="AgentCore Memory&lt;br&gt;session context" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=none;strokeColor=#8C4FFF;dashed=0;verticalLabelPosition=top;verticalAlign=bottom;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.database;" vertex="1" parent="1">
 <mxGeometry x="455" y="119" width="90" height="90" as="geometry"/>
 </mxCell>
-<mxCell id="obs" value="AgentCore Observability&lt;br&gt;traces &#183; metrics" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=none;strokeColor=#E7157B;dashed=0;verticalLabelPosition=top;verticalAlign=bottom;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.cloudwatch;" vertex="1" parent="1">
+<mxCell id="obs" value="AgentCore Observability&lt;br&gt;ADOT spans &#183; logs &#183; metrics" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=none;strokeColor=#E7157B;dashed=0;verticalLabelPosition=top;verticalAlign=bottom;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.cloudwatch;" vertex="1" parent="1">
 <mxGeometry x="619" y="119" width="90" height="90" as="geometry"/>
 </mxCell>
 
-<mxCell id="user" value="Front-end Application&lt;br&gt;(browser SPA)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=none;strokeColor=#232F3E;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.user;" vertex="1" parent="1">
+<mxCell id="user" value="Client Application&lt;br&gt;(Streamlit demo or SDK caller)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=none;strokeColor=#232F3E;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.user;" vertex="1" parent="1">
 <mxGeometry x="50" y="487" width="95" height="95" as="geometry"/>
 </mxCell>
 
@@ -56,11 +56,11 @@
 <mxGeometry x="1200" y="415" width="420" height="240" as="geometry"/>
 </mxCell>
 
-<mxCell id="ddb" value="Amazon DynamoDB&lt;br&gt;social-intel-leads &#183; KMS &#183; TTL" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#C925D1;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.dynamodb;" vertex="1" parent="1">
+<mxCell id="ddb" value="Amazon DynamoDB&lt;br&gt;leads + audited scores &#183; KMS &#183; TTL" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#C925D1;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.dynamodb;" vertex="1" parent="1">
 <mxGeometry x="455" y="818" width="90" height="90" as="geometry"/>
 </mxCell>
 
-<mxCell id="e1" value="&#9312; invoke (JWT / IAM)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jettySize=auto;dashed=0;strokeColor=#2E6DB4;strokeWidth=2;fontColor=#2E6DB4;fontSize=10;endArrow=block;endFill=1;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="user" target="rt">
+<mxCell id="e1" value="&#9312; invoke (IAM / SigV4)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jettySize=auto;dashed=0;strokeColor=#2E6DB4;strokeWidth=2;fontColor=#2E6DB4;fontSize=10;endArrow=block;endFill=1;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="user" target="rt">
 <mxGeometry relative="1" as="geometry"/>
 </mxCell>
 <mxCell id="e2" value="&#9313; tool calls (MCP)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jettySize=auto;dashed=0;strokeColor=#2E6DB4;strokeWidth=2;fontColor=#2E6DB4;fontSize=10;endArrow=block;endFill=1;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="rt" target="gw">
@@ -79,11 +79,11 @@
 <mxCell id="e6" value="session context" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jettySize=auto;dashed=1;strokeColor=#8C4FFF;strokeWidth=1.8;fontColor=#5A2DA0;fontSize=10;endArrow=block;endFill=1;startArrow=block;startFill=1;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="rt" target="memory">
 <mxGeometry relative="1" as="geometry"/>
 </mxCell>
-<mxCell id="e7" value="traces" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jettySize=auto;dashed=1;strokeColor=#E7157B;strokeWidth=1.8;fontColor=#B00E5F;fontSize=10;endArrow=block;endFill=1;labelBackgroundColor=#FFFFFF;exitX=0.815;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="rt" target="obs">
+<mxCell id="e7" value="ADOT + service traces" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jettySize=auto;dashed=1;strokeColor=#E7157B;strokeWidth=1.8;fontColor=#B00E5F;fontSize=10;endArrow=block;endFill=1;labelBackgroundColor=#FFFFFF;exitX=0.815;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="rt" target="obs">
 <mxGeometry relative="1" as="geometry"/>
 </mxCell>
 
-<mxCell id="e8" value="reads / writes (leads)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jettySize=auto;dashed=1;strokeColor=#C925D1;strokeWidth=1.8;fontColor=#93169B;fontSize=10;endArrow=block;endFill=1;startArrow=block;startFill=1;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="rt" target="ddb">
+<mxCell id="e8" value="reads / writes (leads, audited scores, claims)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jettySize=auto;dashed=1;strokeColor=#C925D1;strokeWidth=1.8;fontColor=#93169B;fontSize=10;endArrow=block;endFill=1;startArrow=block;startFill=1;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="rt" target="ddb">
 <mxGeometry relative="1" as="geometry"/>
 </mxCell>
 

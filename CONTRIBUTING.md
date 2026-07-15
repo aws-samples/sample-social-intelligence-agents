@@ -40,14 +40,15 @@ GitHub provides additional document on [forking a repository](https://help.githu
 
 ## How to Add a New Tool
 
-The architecture follows the Open/Closed Principle; adding a tool requires no changes to existing code:
+The extension points keep a new tool localized to its module, registry, schema, and
+intended agent allow-list:
 
 1. Create `src/social_intelligence/tools/<name>.py` with a `handle(params: dict) -> dict` function:
 
 ```python
 """My new API: brief description."""
 
-import httpx
+from ._http import get_with_retry
 
 def handle(params: dict) -> dict:
     """Fetch data from the API.
@@ -56,22 +57,34 @@ def handle(params: dict) -> dict:
         params: query (str), limit (int)
     """
     query = str(params.get("query", ""))[:500]
-    limit = max(1, min(int(params.get("limit", 10)), 20))
+    try:
+        requested_limit = int(params.get("limit", 10))
+    except (TypeError, ValueError):
+        requested_limit = 10
+    limit = max(1, min(requested_limit, 20))
 
-    resp = httpx.get("https://api.example.com/search", params={"q": query, "limit": limit}, timeout=15.0)
+    resp = get_with_retry("https://api.example.com/search", params={"q": query, "limit": limit})
     resp.raise_for_status()
 
     return {"results": resp.json().get("items", []), "query": query}
 ```
 
-2. Add one line to `src/social_intelligence/tools/registry.py`:
+2. Add the API hostname to `_ALLOWED_HOSTS` in `src/social_intelligence/tools/_http.py`.
+   All external calls must use `get_with_retry()` or `post_with_retry()`; this preserves
+   the outbound allow-list, retries, and circuit breaker.
+
+3. Import the module and add a route in `src/social_intelligence/tools/registry.py`:
 
 ```python
 from . import my_new_tool
-ROUTES["my-new-tool"] = my_new_tool.handle
+
+ROUTES = {
+    # Existing routes...
+    "my_new_tool": my_new_tool.handle,
+}
 ```
 
-3. Add the tool schema to `src/social_intelligence/schemas/tool_schema.json`:
+4. Add the tool schema to `src/social_intelligence/schemas/tool_schema.json`:
 
 ```json
 {
@@ -88,9 +101,18 @@ ROUTES["my-new-tool"] = my_new_tool.handle
 }
 ```
 
-4. Update the Lambda handler's `_SCHEMA_TO_ROUTE` map in `infra/lambda/handler.py` if the tool schema name differs from the route key.
+5. Update the Lambda handler's `_SCHEMA_TO_ROUTE` map in `infra/lambda/handler.py` if the tool schema name differs from the route key.
 
-The Lambda handler, AgentCore Gateway, and API Gateway pick up the new tool automatically. No other changes are needed.
+6. Add the schema name to the appropriate allow-list in `entrypoint.py`
+   (`_TREND_GATEWAY_TOOL_NAMES` or `_ENRICHMENT_GATEWAY_TOOL_NAMES`) so the
+   intended agent can discover it through AgentCore Gateway.
+
+7. Add hermetic unit coverage for validation and error paths, then run
+   `python -m pytest tests/ -q --ignore=tests/integration`.
+
+The Lambda handler, AgentCore Gateway, and API Gateway then pick up the new tool
+automatically. Keep the agent allow-list narrow: a new tool is not exposed to every
+agent by default.
 
 ## Finding Contributions to Work On
 
@@ -98,15 +120,9 @@ Looking at the existing issues is a great way to find something to contribute on
 GitHub issue labels (enhancement/bug/duplicate/help wanted/invalid/question/wontfix), looking at any 'help wanted' issues is a
 great place to start.
 
-## Code of Conduct
+## Community and Security
 
-This project has adopted the [Amazon Open Source Code of Conduct](https://aws.github.io/code-of-conduct).
-For more information see the [Code of Conduct FAQ](https://aws.github.io/code-of-conduct-faq) or contact
-opensource-codeofconduct@amazon.com with any additional questions or comments.
-
-## Security Issue Notifications
-
-If you discover a potential security issue in this project we ask that you notify AWS/Amazon Security via our [vulnerability reporting page](http://aws.amazon.com/security/vulnerability-reporting/). Do **not** create a public GitHub issue.
+Read [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community standards. Report vulnerabilities through the process in [SECURITY.md](SECURITY.md), not through a public GitHub issue.
 
 ## Licensing
 

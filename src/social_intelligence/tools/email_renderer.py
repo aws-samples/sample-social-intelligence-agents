@@ -232,7 +232,7 @@ def render_email_html_tool(
     prospect_id: str,
     subject: str,
     body: str,
-    personalization_tokens: str = "",
+    personalization_tokens: list[str] | None = None,
     score: int = 0,
     confidence: float = 0.0,
     data_quality: str = "medium",
@@ -243,12 +243,15 @@ def render_email_html_tool(
         prospect_id: Prospect identifier.
         subject: Email subject line.
         body: Email body text (paragraphs separated by newlines).
-        personalization_tokens: Comma-separated data points referenced in the email.
+        personalization_tokens: Ordered data points referenced in the email.
         score: Prospect relevance score (0-100).
         confidence: Score confidence (0.0-1.0).
         data_quality: Data quality assessment (high/medium/low).
     """
-    tokens = [t.strip() for t in personalization_tokens.split(",") if t.strip()] if personalization_tokens else []
+    if isinstance(personalization_tokens, str):
+        tokens = [token.strip() for token in personalization_tokens.split(",") if token.strip()]
+    else:
+        tokens = [str(token).strip() for token in personalization_tokens or [] if str(token).strip()]
     return render_email_html(
         prospect_id=prospect_id,
         subject=subject,

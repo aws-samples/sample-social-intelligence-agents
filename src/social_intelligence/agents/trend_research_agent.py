@@ -6,7 +6,15 @@ from strands import Agent
 from strands.models import BedrockModel
 
 from social_intelligence.agents import SAFETY_FENCE
-from social_intelligence.config import AWS_REGION, TREND_MODEL_ID, guardrail_kwargs
+from social_intelligence.config import (
+    AWS_REGION,
+    TREND_MAX_TOKENS,
+    TREND_MODEL_ID,
+    bedrock_boto_config,
+    guardrail_kwargs,
+)
+from social_intelligence.orchestration.model_retry import transient_model_retry
+from social_intelligence.orchestration.tool_budget import trend_research_tool_budget
 from social_intelligence.schemas.models import TrendData
 
 SYSTEM_PROMPT = (
@@ -14,6 +22,10 @@ SYSTEM_PROMPT = (
     "TODAY'S DATE: {today}. Use the current year ({year}) in search queries.\n\n"
     "YOUR ROLE: Discover qualified prospects and collect multi-signal trend data across "
     "six sources: Hacker News, Reddit, Product Hunt, YouTube, dev.to, and Stack Overflow.\n\n"
+    "OUTPUT DISCIPLINE (highest priority): Collect facts silently. In Graph mode, make the "
+    "TrendData structured-output call immediately after collection. In Swarm mode, hand off "
+    "the compact prospect JSON immediately after collection. Never emit progress reports, "
+    "score tables, markdown, or a prose summary before the required output or handoff.\n\n"
     "WORKFLOW:\n"
     "1. DISCOVERY — find new launches and buying-intent signals:\n"
     "   - hackernews_trending: category 'top' (limit=10) for tech launches and Show HN posts.\n"
@@ -32,13 +44,14 @@ SYSTEM_PROMPT = (
     "   rank above those found only through passive trending.\n\n"
     "EFFICIENCY: Keep total tool calls under 8. Use HN + Reddit + Product Hunt for discovery,\n"
     "then one or two enrichment signals for the top prospects only. Do NOT call every tool "
-    "for every prospect. If fewer than 3 fresh non-skip-list prospects are found, and a "
-    "web_search tool is available, use it as an overflow source.\n\n"
-    "OUTPUT: Emit a TrendData structured object. For each prospect include:\n"
+    "for every prospect. If fewer than 3 fresh non-skip-list prospects are found, and the "
+    "managed WebSearch tool is available, use it as an overflow source.\n\n"
+    "OUTPUT: Emit a TrendData structured object with at most 5 prospects. For each prospect include:\n"
     "- prospect_id: the source platform's unique ID (e.g. HN story ID, Reddit post ID)\n"
-    "- product_name, url, hn_score (if from HN), author\n"
-    "- trend_signals: list of per-source signal objects with engagement metrics\n"
-    "- multi_signal_strength: one of 'strong', 'moderate', or 'weak'\n\n"
+    "- product_name, source_url, author\n"
+    "- community_score: the source's engagement count (HN points, Reddit upvotes, etc.)\n"
+    "- trend_signals: up to 3 per-source signal objects with engagement metrics\n"
+    "- signal_strength: one of 'strong', 'moderate', or 'weak'\n\n"
     "DEDUPLICATION: The user prompt includes a SKIP LIST of products already in our database. "
     "Do NOT research or return any product on that list. Focus on new prospects only. "
     "Call check_existing_leads() to verify borderline cases by prospect_id or product_name."
@@ -85,8 +98,16 @@ def create_trend_research_agent(
     return Agent(
         name="trend_researcher",
         description=DESCRIPTION,
-        model=BedrockModel(model_id=TREND_MODEL_ID, region_name=AWS_REGION, **guardrail_kwargs()),
+        model=BedrockModel(
+            model_id=TREND_MODEL_ID,
+            region_name=AWS_REGION,
+            boto_client_config=bedrock_boto_config(),
+            max_tokens=TREND_MAX_TOKENS,
+            **guardrail_kwargs(),
+        ),
         system_prompt=prompt,
         tools=tools or [],
+        hooks=[transient_model_retry(), trend_research_tool_budget()],
+        retry_strategy=None,
         **kwargs,
     )

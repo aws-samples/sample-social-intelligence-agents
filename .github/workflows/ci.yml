@@ -10,6 +10,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   quality:
     name: quality
@@ -22,10 +25,18 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install dependencies
-        run: uv sync --extra dev
+        run: |
+          uv lock --check
+          uv sync --extra dev --locked
+
+      - name: Verify runtime dependency export
+        run: |
+          uv export --frozen --format requirements-txt --no-dev --no-emit-project --no-hashes --no-header --no-annotate \
+            --output-file /tmp/runtime-requirements.txt
+          diff --unified=3 infra/runtime-requirements.txt /tmp/runtime-requirements.txt
 
       - name: Lint
         run: >
@@ -47,6 +58,7 @@ jobs:
           entrypoint.py
           scripts/
           tests/
+          infra/app.py
           infra/gateway_stack.py
           infra/stacks/
           infra/lambda/handler.py

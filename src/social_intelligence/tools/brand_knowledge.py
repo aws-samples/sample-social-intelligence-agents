@@ -28,9 +28,23 @@ def retrieve_brand_knowledge(topic: str = "general") -> str:
             "content": {
                 "brand_name": "AnyCompany",
                 "tone": "Professional, warm, concise. No jargon. Be genuine.",
-                "value_prop": "AI-powered social intelligence for smarter outreach",
+                "value_prop": (
+                    "Use public launch and community signals to prioritize concrete "
+                    "sales and developer-relations follow-up"
+                ),
+                "concrete_outcomes": [
+                    "rank launch comments and discussion threads for developer-relations follow-up",
+                    "prioritize public replies that indicate product adoption questions",
+                    "route high-signal community conversations to the appropriate outreach owner",
+                ],
                 "cta_style": "Low-friction: suggest a 15-minute call or async demo",
-                "avoid": ["Salesy language", "Generic templates", "Exclamation marks"],
+                "avoid": [
+                    "Salesy language",
+                    "Generic templates",
+                    "Exclamation marks",
+                    "Unverified claims about the prospect's internal operations",
+                    "Abstract claims about social intelligence or buyer-intent signals without a concrete action",
+                ],
             },
         }
     )

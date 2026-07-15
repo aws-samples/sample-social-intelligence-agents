@@ -8,7 +8,8 @@ Swap or add data sources here:
     1. Implement the handler in `src/social_intelligence/tools/<name>.py`
     2. Add the route in `src/social_intelligence/tools/registry.py`
     3. Add the tool definition to `src/social_intelligence/schemas/tool_schema.json`
-    4. Register a new Lambda target below with `gateway.add_lambda_target(...)`
+    4. Add the schema-to-route mapping only when its name differs from the route key
+    5. Add the schema name to the responsible agent's allow-list in `entrypoint.py`
 
 The Gateway uses IAM inbound auth (SigV4); the agent discovers tools over MCP.
 """
@@ -17,7 +18,7 @@ from __future__ import annotations
 
 import os
 
-import aws_cdk.aws_bedrock_agentcore_alpha as agentcore
+from aws_cdk import aws_bedrockagentcore as agentcore
 from aws_cdk import aws_lambda as lambda_
 from constructs import Construct
 
@@ -36,8 +37,8 @@ def build_tools_gateway(
         project_root: Repository root, used to locate the tool schema asset.
 
     Returns:
-        The configured Gateway. Call `add_lambda_target` on it to register
-        additional data sources without touching the main stack.
+        The configured Gateway. The single Lambda target loads every tool declared
+        in `tool_schema.json`.
     """
     gateway = agentcore.Gateway(
         scope,
@@ -64,21 +65,9 @@ def build_tools_gateway(
         tool_schema=tool_schema,
     )
 
-    # TODO: Web Search MCP target — not available as a native CDK construct in
-    # aws-cdk.aws-bedrock-agentcore-alpha==2.238.0a0.  The module exposes
-    # `gateway.add_mcp_server_target(...)` which accepts an existing MCP server URL,
-    # but there is no managed "web search" target type.  Once AWS publishes a hosted
-    # web-search MCP endpoint (see AgentCore Gateway docs:
-    # https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-MCPservers.html),
-    # register it here:
-    #
-    # gateway.add_mcp_server_target(
-    #     "WebSearchTarget",
-    #     gateway_target_name="social-intel-web-search",
-    #     description="Web search via AgentCore-hosted MCP server",
-    #     mcp_server_config=agentcore.McpServerTargetConfiguration.create(
-    #         "<WEB_SEARCH_MCP_SERVER_ENDPOINT_URL>"
-    #     ),
-    # )
+    # AgentCore's managed WebSearch connector is currently available only in us-east-1.
+    # The active eu-west-1 deployment cannot add its ``connectorId: "web-search"`` target.
+    # The Trend agent accepts WebSearch automatically when a supported-region deployment
+    # adds that MCP target in the future.
 
     return gateway

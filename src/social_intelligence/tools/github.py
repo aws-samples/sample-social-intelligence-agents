@@ -1,6 +1,7 @@
 """GitHub Search API: open-source intelligence."""
 
 import logging
+import re
 from datetime import date, timedelta
 
 from ._freshness import freshness_weight
@@ -10,6 +11,12 @@ from ._secrets import get_secret
 logger = logging.getLogger(__name__)
 
 _VALID_SORTS = {"stars", "forks", "updated"}
+_GITHUB_TOKEN_PATTERN = re.compile(r"^(?:gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82})$")
+
+
+def _valid_github_token(value: str) -> bool:
+    """Return whether a secret has a supported GitHub token format."""
+    return bool(_GITHUB_TOKEN_PATTERN.fullmatch(value))
 
 
 def _auth_headers() -> dict[str, str]:
@@ -24,8 +31,12 @@ def _auth_headers() -> dict[str, str]:
     }
     try:
         token = get_secret("social-intel/github-token").strip()
-        if token:
+        if _valid_github_token(token):
             headers["Authorization"] = f"Bearer {token}"
+        elif token:
+            # Secrets Manager creates a random initial value when no real token was
+            # supplied. Do not send that bootstrap value to GitHub as a credential.
+            logger.info("GitHub token is not configured; using unauthenticated requests")
     except Exception:
         # Secret unavailable: proceed unauthenticated (60 req/hr limit applies)
         logger.debug("GitHub token secret unavailable; using unauthenticated requests")

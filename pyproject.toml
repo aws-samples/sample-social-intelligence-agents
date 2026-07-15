@@ -8,12 +8,12 @@ version = "0.1.0"
 description = "Multi-agent social intelligence system built with Strands Agents SDK and Amazon Bedrock AgentCore"
 readme = "README.md"
 license = "MIT-0"
-requires-python = ">=3.12"
+requires-python = ">=3.14,<3.15"
 dependencies = [
-    "strands-agents==1.44.0",
-    "bedrock-agentcore[strands-agents]==1.15.0",
-    "boto3>=1.42.46",
-    "pydantic==2.12.5",
+    "strands-agents==1.47.0",
+    "bedrock-agentcore[strands-agents]==1.18.0",
+    "boto3>=1.43.31",
+    "pydantic==2.13.4",
     "httpx==0.28.1",
     "jinja2==3.1.6",
     "mcp-proxy-for-aws==1.6.2",
@@ -21,9 +21,15 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest==8.4.0",
+    "pytest==9.1.1",
     "pytest-cov==7.1.0",
-    "ruff==0.15.17",
+    "ruff==0.15.21",
+]
+infra = [
+    "aws-cdk-lib==2.261.0",
+    "constructs==10.6.0",
+    "cdk-nag==2.38.2",
+    "pip>=25.0,<26.0",
 ]
 demo = [
     "streamlit==1.45.0",
@@ -36,7 +42,7 @@ demo = [
 packages = ["src/social_intelligence"]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py314"
 line-length = 120
 src = ["src"]
 exclude = ["infra/lambda/.bundle"]
@@ -50,3 +56,9 @@ select = ["E", "F", "I", "W", "B", "S"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    # Latest upstream SDK releases emit these internal deprecations during import.
+    # Keep repository and transitive application warnings visible in CI.
+    "ignore:Support for class-based `config` is deprecated, use ConfigDict instead.:pydantic.warnings.PydanticDeprecatedSince20:bedrock_agentcore\\.runtime\\.context",
+    "ignore:strands\\.experimental\\.hooks\\.multiagent is deprecated\\. Use strands\\.hooks instead\\.:DeprecationWarning:strands\\.experimental\\.hooks\\.multiagent",
+]

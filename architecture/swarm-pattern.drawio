@@ -5,7 +5,7 @@
 <mxCell id="0"/>
 <mxCell id="1" parent="0"/>
 
-<mxCell id="caption" value="Swarm pattern &#8212; execution path discovered at runtime by the agents (emergent, exploratory)" style="text;html=1;fontColor=#37475A;fontSize=13;fontStyle=1;align=center;" vertex="1" parent="1">
+<mxCell id="caption" value="Swarm pattern &#8212; bounded handoffs with an expected research &#8594; search &#8594; analysis &#8594; email route" style="text;html=1;fontColor=#37475A;fontSize=13;fontStyle=1;align=center;" vertex="1" parent="1">
 <mxGeometry x="120" y="24" width="1480" height="24" as="geometry"/>
 </mxCell>
 
@@ -13,7 +13,7 @@
 <mxGeometry x="34" y="320" width="95" height="95" as="geometry"/>
 </mxCell>
 
-<mxCell id="mem" value="Shared Working Memory&#160;&#160;&#183;&#160;&#160;full task context visible to every agent" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F7EEFF;strokeColor=#8C4FFF;verticalAlign=top;align=left;spacingLeft=16;spacingTop=10;fontColor=#5A2DA0;fontStyle=1;fontSize=13;arcSize=2;dashed=1;dashPattern=8 4;strokeWidth=2;" vertex="1" parent="1">
+<mxCell id="mem" value="Run context &#183; explicit handoff payloads + optional AgentCore Memory session state" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F7EEFF;strokeColor=#8C4FFF;verticalAlign=top;align=left;spacingLeft=16;spacingTop=10;fontColor=#5A2DA0;fontStyle=1;fontSize=13;arcSize=2;dashed=1;dashPattern=8 4;strokeWidth=2;" vertex="1" parent="1">
 <mxGeometry x="200" y="90" width="900" height="560" as="geometry"/>
 </mxCell>
 
@@ -23,25 +23,25 @@
 <mxCell id="a_search" value="&lt;b&gt;Search Specialist Agent&lt;/b&gt;&lt;br&gt;&lt;br&gt;Enriches each prospect&lt;br&gt;&#8594; EnrichmentData" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAF3FE;strokeColor=#2E6DB4;fontColor=#1A4B8C;fontSize=12;align=center;verticalAlign=middle;arcSize=8;dashed=0;strokeWidth=2;" vertex="1" parent="1">
 <mxGeometry x="750" y="150" width="300" height="120" as="geometry"/>
 </mxCell>
-<mxCell id="a_email" value="&lt;b&gt;Email Generation Agent&lt;/b&gt;&lt;br&gt;&lt;br&gt;Drafts + grounds the email&lt;br&gt;&#8594; EmailDraft" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCECEF;strokeColor=#DD344C;fontColor=#B0263B;fontSize=12;align=center;verticalAlign=middle;arcSize=8;dashed=0;strokeWidth=2;" vertex="1" parent="1">
+<mxCell id="a_email" value="&lt;b&gt;Email Generation Agent&lt;/b&gt;&lt;br&gt;&lt;br&gt;Drafts, verifies, and&lt;br&gt;persists grounded leads" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCECEF;strokeColor=#DD344C;fontColor=#B0263B;fontSize=12;align=center;verticalAlign=middle;arcSize=8;dashed=0;strokeWidth=2;" vertex="1" parent="1">
 <mxGeometry x="250" y="470" width="300" height="120" as="geometry"/>
 </mxCell>
-<mxCell id="a_analysis" value="&lt;b&gt;Analysis Agent&lt;/b&gt;&lt;br&gt;&lt;br&gt;Scores each prospect 0&#8211;100&lt;br&gt;&#8594; ScoredProspect" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF6EC;strokeColor=#ED7100;fontColor=#8A4B00;fontSize=12;align=center;verticalAlign=middle;arcSize=8;dashed=0;strokeWidth=2;" vertex="1" parent="1">
+<mxCell id="a_analysis" value="&lt;b&gt;Analysis Agent&lt;/b&gt;&lt;br&gt;&lt;br&gt;Scores and persists every prospect&lt;br&gt;before the email handoff" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF6EC;strokeColor=#ED7100;fontColor=#8A4B00;fontSize=12;align=center;verticalAlign=middle;arcSize=8;dashed=0;strokeWidth=2;" vertex="1" parent="1">
 <mxGeometry x="750" y="470" width="300" height="120" as="geometry"/>
 </mxCell>
 
-<mxCell id="handoff_note" value="every edge is a handoff_to_agent() call &#183; targets chosen by the agent at runtime" style="text;html=1;fontColor=#8C4FFF;fontSize=11;fontStyle=2;align=center;" vertex="1" parent="1">
+<mxCell id="handoff_note" value="agent-to-agent edges are handoff_to_agent() calls &#183; targets chosen at runtime" style="text;html=1;fontColor=#8C4FFF;fontSize=11;fontStyle=2;align=center;" vertex="1" parent="1">
 <mxGeometry x="470" y="352" width="360" height="20" as="geometry"/>
 </mxCell>
 
-<mxCell id="out" value="Scored Leads +&#10;Email Drafts" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#232F3E;strokeColor=#232F3E;fontColor=#FFFFFF;fontSize=12;fontStyle=1;arcSize=10;" vertex="1" parent="1">
+<mxCell id="out" value="Scored Prospects +&#10;Grounded Emails" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#232F3E;strokeColor=#232F3E;fontColor=#FFFFFF;fontSize=12;fontStyle=1;arcSize=10;" vertex="1" parent="1">
 <mxGeometry x="310" y="670" width="180" height="60" as="geometry"/>
 </mxCell>
 
-<mxCell id="safety" value="&lt;b&gt;Swarm safety mechanisms&lt;/b&gt;&lt;br&gt;&lt;br&gt;max_handoffs = 15&lt;br&gt;max_iterations = 15&lt;br&gt;execution_timeout = 1200s&lt;br&gt;node_timeout = 300s&lt;br&gt;repetitive_handoff_detection_window = 8&lt;br&gt;repetitive_handoff_min_unique_agents = 3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCECEF;strokeColor=#DD344C;fontColor=#B0263B;fontSize=11;align=left;verticalAlign=top;spacingLeft=12;spacingTop=10;dashed=1;arcSize=6;" vertex="1" parent="1">
+<mxCell id="safety" value="&lt;b&gt;Swarm safety mechanisms&lt;/b&gt;&lt;br&gt;&lt;br&gt;max_handoffs = 5&lt;br&gt;max_iterations = 6&lt;br&gt;execution_timeout = 1200s&lt;br&gt;node_timeout = 960s&lt;br&gt;repetitive_handoff_detection_window = 3&lt;br&gt;repetitive_handoff_min_unique_agents = 3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCECEF;strokeColor=#DD344C;fontColor=#B0263B;fontSize=11;align=left;verticalAlign=top;spacingLeft=12;spacingTop=10;dashed=1;arcSize=6;" vertex="1" parent="1">
 <mxGeometry x="1160" y="150" width="380" height="180" as="geometry"/>
 </mxCell>
-<mxCell id="dyn" value="&lt;b&gt;Dynamic routing&lt;/b&gt;&lt;br&gt;&lt;br&gt;&#183; Every agent sees the full task context&lt;br&gt;&#183; Agents decide their own handoff targets&lt;br&gt;&#183; The sequence emerges from reasoning&lt;br&gt;&#183; Typical: 8 to 15 handoffs per prospect" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F7EEFF;strokeColor=#8C4FFF;fontColor=#5A2DA0;fontSize=11;align=left;verticalAlign=top;spacingLeft=12;spacingTop=10;dashed=1;arcSize=6;" vertex="1" parent="1">
+<mxCell id="dyn" value="&lt;b&gt;Dynamic routing&lt;/b&gt;&lt;br&gt;&lt;br&gt;&#183; Typed outputs travel in handoff context&lt;br&gt;&#183; Agents choose targets within the hard budget&lt;br&gt;&#183; Optional re-query / loopback remains bounded&lt;br&gt;&#183; Expected path: 3 handoffs across 4 agents" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F7EEFF;strokeColor=#8C4FFF;fontColor=#5A2DA0;fontSize=11;align=left;verticalAlign=top;spacingLeft=12;spacingTop=10;dashed=1;arcSize=6;" vertex="1" parent="1">
 <mxGeometry x="1160" y="410" width="380" height="180" as="geometry"/>
 </mxCell>
 

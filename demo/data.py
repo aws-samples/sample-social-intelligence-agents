@@ -4,10 +4,33 @@ import logging
 
 import boto3
 import streamlit as st
+from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError, ProfileNotFound
 from config import AGENT_ARN, AWS_PROFILE, AWS_REGION, LEADS_TABLE
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_trends(value) -> list[str]:
+    """Return top_trends as a list of non-empty strings.
+
+    store_lead persists top_trends as a list, but older records (and manual writes)
+    may hold a comma-separated string. Accept both so lead rendering never crashes on
+    a list (str.split would raise) or shows list syntax as badge text.
+
+    Args:
+        value: The raw top_trends value from a lead record (list, str, or None).
+
+    Returns:
+        A list of trimmed, non-empty trend strings.
+    """
+    if isinstance(value, list):
+        items = value
+    elif isinstance(value, str):
+        items = value.split(",")
+    else:
+        return []
+    return [str(item).strip() for item in items if str(item).strip()]
 
 
 def get_boto_session():
@@ -25,16 +48,23 @@ def get_leads(limit: int = 50) -> list[dict]:
     try:
         session = get_boto_session()
         table = session.resource("dynamodb", region_name=AWS_REGION).Table(LEADS_TABLE)
+        capped_limit = max(1, min(int(limit), 50))
+        # The GSI returns the newest lead keys in order. Fetch the full records by
+        # primary key because the dashboard renders fields not projected by the index.
+        index_items = table.query(
+            IndexName="dedup-partition-discovered-at-index",
+            KeyConditionExpression=Key("dedup_partition").eq("LEAD"),
+            ScanIndexForward=False,
+            Limit=capped_limit,
+        ).get("Items", [])
         leads: list[dict] = []
-        scan_kwargs: dict = {"Limit": 100}  # page size
-        while True:
-            resp = table.scan(**scan_kwargs)
-            leads.extend(resp.get("Items", []))
-            if len(leads) >= limit * 3 or "LastEvaluatedKey" not in resp:
-                break
-            scan_kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
-        leads.sort(key=lambda x: x.get("discovered_at", ""), reverse=True)
-        return leads[:limit]
+        for item in index_items:
+            lead = table.get_item(Key={"prospect_id": item["prospect_id"], "discovered_at": item["discovered_at"]}).get(
+                "Item"
+            )
+            if lead:
+                leads.append(lead)
+        return leads
     except ClientError as e:
         code = e.response["Error"]["Code"]
         if code == "ResourceNotFoundException":

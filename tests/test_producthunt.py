@@ -91,7 +91,7 @@ class TestProductHuntTool:
 
         assert result["posts"] == []
         assert "error" in result
-        assert result["error"] == "No PH token"
+        assert result["error"] == "not_configured"
 
     @patch("social_intelligence.tools.producthunt.get_secret", return_value=None)
     def test_none_token_returns_gracefully(self, _mock_secret):
@@ -101,6 +101,16 @@ class TestProductHuntTool:
 
         assert result["posts"] == []
         assert "error" in result
+
+    @patch("social_intelligence.tools.producthunt.get_secret", return_value="generated/bootstrap?value")
+    @patch("social_intelligence.tools.producthunt.post_with_retry")
+    def test_invalid_bootstrap_token_skips_network_call(self, mock_post, _mock_secret):
+        from social_intelligence.tools.producthunt import handle
+
+        result = handle({"topic": "ai"})
+
+        assert result["error"] == "not_configured"
+        mock_post.assert_not_called()
 
     @patch("social_intelligence.tools.producthunt.get_secret", return_value="fake-ph-token")
     @patch("social_intelligence.tools.producthunt.post_with_retry")

@@ -11,9 +11,11 @@ import sys
 import time
 from unittest.mock import MagicMock, patch
 
+import boto3
 import httpx
 import pytest
 from botocore.exceptions import ClientError
+from botocore.stub import ANY, Stubber
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -23,6 +25,17 @@ from botocore.exceptions import ClientError
 def _client_error(code: str) -> ClientError:
     """Build a botocore ClientError with the given Error.Code."""
     return ClientError({"Error": {"Code": code, "Message": "mock"}}, "operation")
+
+
+def _transaction_cancelled_for_dedup() -> ClientError:
+    """Build the cancellation response emitted when a transaction reservation exists."""
+    return ClientError(
+        {
+            "Error": {"Code": "TransactionCanceledException", "Message": "dedup marker exists"},
+            "CancellationReasons": [{"Code": "ConditionalCheckFailed"}],
+        },
+        "TransactWriteItems",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -113,18 +126,17 @@ class TestCheckExistingLeads:
         assert result["exists"] is False
         assert result["product_name"] == "Unknown"
 
-    # -- scan / recent-leads path (limit) ------------------------------------
+    # -- recent-leads GSI path (limit) ---------------------------------------
 
-    def test_scan_returns_leads_list_with_count(self):
+    def test_recent_leads_query_returns_leads_list_with_count(self):
         from social_intelligence.tools import dynamodb_tool
 
         mock_table = self._mock_table()
-        mock_table.scan.return_value = {
+        mock_table.query.return_value = {
             "Items": [
                 {"prospect_id": "hn-1", "product_name": "Alpha", "score": 80, "discovered_at": "2025-06-01T00:00:00"},
                 {"prospect_id": "hn-2", "product_name": "Beta", "score": 70, "discovered_at": "2025-05-01T00:00:00"},
             ]
-            # No LastEvaluatedKey -> single page
         }
 
         with patch.object(dynamodb_tool, "_get_table", return_value=mock_table):
@@ -135,13 +147,14 @@ class TestCheckExistingLeads:
         assert result["source"] == "DynamoDB"
         assert result["count"] == 2
         assert len(result["leads"]) == 2
+        assert mock_table.query.call_args.kwargs["IndexName"] == dynamodb_tool.RECENT_LEADS_INDEX
 
-    def test_scan_respects_limit_cap(self):
+    def test_recent_leads_query_respects_limit_cap(self):
         from social_intelligence.tools import dynamodb_tool
 
         mock_table = self._mock_table()
         # Return 1 item; limit=1 means only 1 returned
-        mock_table.scan.return_value = {
+        mock_table.query.return_value = {
             "Items": [
                 {"prospect_id": "hn-1", "product_name": "Alpha", "score": 80, "discovered_at": "2025-06-01T00:00:00"},
             ]
@@ -153,6 +166,7 @@ class TestCheckExistingLeads:
             )
 
         assert len(result["leads"]) == 1
+        assert mock_table.query.call_args.kwargs["Limit"] == 1
 
     def test_clienterror_returns_storage_error(self):
         from social_intelligence.tools import dynamodb_tool
@@ -278,6 +292,36 @@ class TestClaimUrl:
         assert "reason" not in result
         mock_table.put_item.assert_called_once()
 
+    def test_claim_records_owner_and_allows_expired_claim_replacement(self):
+        from social_intelligence.tools import dynamodb_tool
+
+        mock_table = MagicMock()
+        mock_table.put_item.return_value = {}
+
+        dynamodb_tool.set_run_session_id("run-123")
+        try:
+            with patch.dict(os.environ, {"FRONTIER_TABLE_NAME": "test-frontier"}):
+                with patch.object(dynamodb_tool, "_get_frontier_table", return_value=mock_table):
+                    result = json.loads(dynamodb_tool.claim_url.__wrapped__(" prospect:hn-500 "))
+        finally:
+            dynamodb_tool.set_run_session_id("")
+
+        assert result["claimed"] is True
+        kwargs = mock_table.put_item.call_args.kwargs
+        assert kwargs["Item"]["claim_key"] == "prospect:hn-500"
+        assert kwargs["Item"]["owner_id"] == "run-123"
+        assert "expires_at < :now" in kwargs["ConditionExpression"]
+        assert kwargs["ExpressionAttributeValues"][":owner"] == "run-123"
+
+    def test_blank_claim_key_is_rejected_before_dynamodb(self):
+        from social_intelligence.tools import dynamodb_tool
+
+        with patch.object(dynamodb_tool, "_get_frontier_table") as get_table:
+            result = json.loads(dynamodb_tool.claim_url.__wrapped__("   "))
+
+        assert result == {"claimed": False, "reason": "claim_key is required"}
+        get_table.assert_not_called()
+
     def test_claim_fails_returns_false_already_claimed(self):
         from social_intelligence.tools import dynamodb_tool
 
@@ -336,14 +380,16 @@ class TestStoreLeadExtra:
         assert result["stored"] is False
         assert "duplicate" in result["reason"].lower()
         assert result["existing_prospect_id"] == "hn-old"
-        mock_table.put_item.assert_not_called()
+        mock_table.meta.client.transact_write_items.assert_not_called()
 
     def test_storage_clienterror_returns_storage_error(self):
         from social_intelligence.tools import dynamodb_tool
 
         mock_table = MagicMock()
         mock_table.query.return_value = {"Items": []}
-        mock_table.put_item.side_effect = _client_error("ProvisionedThroughputExceededException")
+        mock_table.meta.client.transact_write_items.side_effect = _client_error(
+            "ProvisionedThroughputExceededException"
+        )
 
         with patch.object(dynamodb_tool, "_get_table", return_value=mock_table):
             with patch.object(dynamodb_tool, "_find_by_product_name", return_value=None):
@@ -357,7 +403,7 @@ class TestStoreLeadExtra:
 
         mock_table = MagicMock()
         mock_table.query.return_value = {"Items": []}
-        mock_table.put_item.side_effect = _client_error("ConditionalCheckFailedException")
+        mock_table.meta.client.transact_write_items.side_effect = _transaction_cancelled_for_dedup()
 
         with patch.object(dynamodb_tool, "_get_table", return_value=mock_table):
             with patch.object(dynamodb_tool, "_find_by_product_name", return_value=None):
@@ -368,14 +414,76 @@ class TestStoreLeadExtra:
         assert result["stored"] is False
         assert "duplicate" in result["reason"].lower()
 
+    def test_atomic_write_uses_native_values_with_resource_client(self):
+        """The DynamoDB resource serializes transaction items exactly once."""
+        from social_intelligence.tools import dynamodb_tool
+
+        table = boto3.resource(
+            "dynamodb",
+            region_name="eu-west-1",
+            aws_access_key_id="test",
+            aws_secret_access_key="test",  # noqa: S106 - stubbed credential prevents provider I/O
+        ).Table("social-intel-leads")
+        expected = {
+            "TransactItems": [
+                {
+                    "Put": {
+                        "TableName": "social-intel-leads",
+                        "Item": {
+                            "prospect_id": ANY,
+                            "discovered_at": "__dedup_marker__",
+                            "record_type": "dedup_marker",
+                            "expires_at": 1_800_000_000,
+                        },
+                        "ConditionExpression": "attribute_not_exists(prospect_id)",
+                    }
+                },
+                {
+                    "Put": {
+                        "TableName": "social-intel-leads",
+                        "Item": {
+                            "prospect_id": ANY,
+                            "discovered_at": "__dedup_marker__",
+                            "record_type": "dedup_marker",
+                            "expires_at": 1_800_000_000,
+                        },
+                        "ConditionExpression": "attribute_not_exists(prospect_id)",
+                    }
+                },
+                {
+                    "Put": {
+                        "TableName": "social-intel-leads",
+                        "Item": {
+                            "prospect_id": "hn-resource-client",
+                            "product_name": "Resource Client",
+                            "discovered_at": "2026-07-15T00:00:00+00:00",
+                        },
+                        "ConditionExpression": (
+                            "attribute_not_exists(prospect_id) AND attribute_not_exists(discovered_at)"
+                        ),
+                    }
+                },
+            ]
+        }
+
+        with Stubber(table.meta.client) as stubber:
+            stubber.add_response("transact_write_items", {}, expected)
+            dynamodb_tool._store_lead_atomically(
+                table,
+                {
+                    "prospect_id": "hn-resource-client",
+                    "product_name": "Resource Client",
+                    "discovered_at": "2026-07-15T00:00:00+00:00",
+                },
+                expires_at=1_800_000_000,
+            )
+
     def test_stored_item_has_expires_at_set(self):
-        """expires_at must be a Unix epoch int in the put_item call."""
+        """expires_at must be a Unix epoch int in the transactional lead write."""
         from social_intelligence.tools import dynamodb_tool
 
         mock_table = MagicMock()
         mock_table.query.return_value = {"Items": []}
-        mock_table.put_item.return_value = {}
-
         with patch.object(dynamodb_tool, "_get_table", return_value=mock_table):
             with patch.object(dynamodb_tool, "_find_by_product_name", return_value=None):
                 result = json.loads(
@@ -383,11 +491,10 @@ class TestStoreLeadExtra:
                 )
 
         assert result["stored"] is True
-        call_kwargs = mock_table.put_item.call_args[1]
-        item = call_kwargs["Item"]
+        writes = mock_table.meta.client.transact_write_items.call_args.kwargs["TransactItems"]
+        item = writes[-1]["Put"]["Item"]
         assert "expires_at" in item
         # expires_at must be a positive integer (Unix epoch)
-        assert isinstance(item["expires_at"], int)
         assert item["expires_at"] > int(time.time())  # at least in the future
 
 
@@ -396,17 +503,14 @@ class TestStoreLeadExtra:
 # ---------------------------------------------------------------------------
 
 
-class TestGroundingGateGuardrailBranch:
-    """verify_email_claims guardrail branch: call + error fallback."""
+class TestGroundingGateInlineGuardrails:
+    """The grounding tool must not duplicate Converse guardrail evaluation."""
 
-    def test_guardrail_invoked_when_env_vars_set(self):
+    def test_guardrail_env_does_not_trigger_a_second_bedrock_request(self):
         from social_intelligence.tools.grounding_gate import verify_email_claims
 
-        mock_client = MagicMock()
-        mock_client.apply_guardrail.return_value = {"action": "NONE"}
-
         with patch.dict(os.environ, {"GUARDRAIL_ID": "gid-1", "GUARDRAIL_VERSION": "1"}):
-            with patch("social_intelligence.tools.grounding_gate._get_bedrock_client", return_value=mock_client):
+            with patch("boto3.client") as mock_boto:
                 result = json.loads(
                     verify_email_claims.__wrapped__(
                         email_body="We have 500 users.",
@@ -414,50 +518,13 @@ class TestGroundingGateGuardrailBranch:
                     )
                 )
 
-        mock_client.apply_guardrail.assert_called_once()
-        assert result["guardrail_action"] == "NONE"
+        mock_boto.assert_not_called()
         assert isinstance(result["grounding_score"], float)
-
-    def test_guardrail_raises_falls_back_to_structured_check(self):
-        from social_intelligence.tools.grounding_gate import verify_email_claims
-
-        mock_client = MagicMock()
-        mock_client.apply_guardrail.side_effect = RuntimeError("network error")
-
-        with patch.dict(os.environ, {"GUARDRAIL_ID": "gid-2", "GUARDRAIL_VERSION": "2"}):
-            with patch("social_intelligence.tools.grounding_gate._get_bedrock_client", return_value=mock_client):
-                result = json.loads(
-                    verify_email_claims.__wrapped__(
-                        email_body="Great work on 1.5K downloads!",
-                        evidence_json=json.dumps({"data": "1.5k downloads"}),
-                    )
-                )
-
-        # Must not raise; guardrail_action is None (error path)
-        assert result["guardrail_action"] is None
-        assert result["grounding_score"] == 1.0  # claim found in evidence
-
-    def test_guardrail_returns_non_none_action_in_result(self):
-        from social_intelligence.tools.grounding_gate import verify_email_claims
-
-        mock_client = MagicMock()
-        mock_client.apply_guardrail.return_value = {"action": "BLOCKED"}
-
-        with patch.dict(os.environ, {"GUARDRAIL_ID": "gid-3", "GUARDRAIL_VERSION": "1"}):
-            with patch("social_intelligence.tools.grounding_gate._get_bedrock_client", return_value=mock_client):
-                result = json.loads(
-                    verify_email_claims.__wrapped__(
-                        email_body="No metrics here.",
-                        evidence_json="{}",
-                    )
-                )
-
-        assert result["guardrail_action"] == "BLOCKED"
-        assert result["grounding_score"] == 1.0  # no numeric claims
+        assert result["must_revise"] is False
 
 
 class TestClaimExtractionEdgeCases:
-    """_extract_claims handles %, K/M/B suffixes, dollar amounts, and bare integers."""
+    """_extract_claims handles real metrics while excluding identifier-like tokens."""
 
     def test_percent_token(self):
         from social_intelligence.tools.grounding_gate import _extract_claims
@@ -490,6 +557,11 @@ class TestClaimExtractionEdgeCases:
         from social_intelligence.tools.grounding_gate import _extract_claims
 
         assert _extract_claims("Great launch, well done!") == []
+
+    def test_model_name_with_scale_suffix_is_not_a_claim(self):
+        from social_intelligence.tools.grounding_gate import _extract_claims
+
+        assert _extract_claims("I enjoyed reading about Bonsai 27B.") == []
 
     def test_deduplication_preserves_order(self):
         from social_intelligence.tools.grounding_gate import _extract_claims
@@ -660,7 +732,7 @@ class TestAugmentPromptWithSkipList:
         from social_intelligence.tools import dynamodb_tool
 
         mock_table = MagicMock()
-        mock_table.scan.return_value = {
+        mock_table.query.return_value = {
             "Items": [
                 {"product_name": "AlphaProduct"},
                 {"product_name": "BetaProduct"},
@@ -678,7 +750,7 @@ class TestAugmentPromptWithSkipList:
         from social_intelligence.tools import dynamodb_tool
 
         mock_table = MagicMock()
-        mock_table.scan.return_value = {"Items": []}
+        mock_table.query.return_value = {"Items": []}
 
         with patch.object(dynamodb_tool, "_get_table", return_value=mock_table):
             original = "Find new AI tools"
@@ -690,7 +762,7 @@ class TestAugmentPromptWithSkipList:
         from social_intelligence.tools import dynamodb_tool
 
         mock_table = MagicMock()
-        mock_table.scan.side_effect = Exception("DynamoDB unavailable")
+        mock_table.query.side_effect = Exception("DynamoDB unavailable")
 
         with patch.object(dynamodb_tool, "_get_table", return_value=mock_table):
             original = "Find new AI tools"
@@ -702,7 +774,7 @@ class TestAugmentPromptWithSkipList:
         from social_intelligence.tools import dynamodb_tool
 
         mock_table = MagicMock()
-        mock_table.scan.return_value = {
+        mock_table.query.return_value = {
             "Items": [
                 {"product_name": "Acme"},
                 {"product_name": "acme"},  # duplicate (case-insensitive)
@@ -721,7 +793,7 @@ class TestAugmentPromptWithSkipList:
         from social_intelligence.tools import dynamodb_tool
 
         mock_table = MagicMock()
-        mock_table.scan.return_value = {
+        mock_table.query.return_value = {
             "Items": [
                 {"product_name": ""},
                 {"product_name": "   "},

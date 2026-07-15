@@ -41,7 +41,7 @@ AGENT_ARN = os.environ.get(
     "AGENTCORE_AGENT_ARN",
     "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/social_intel-XXXXXXXXXX",
 )
-REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
 PROFILE = os.environ.get("AWS_PROFILE", "default")
 
 
@@ -52,7 +52,7 @@ def main():
     client = session.client(
         "bedrock-agentcore",
         region_name=REGION,
-        config=BotoConfig(read_timeout=900, retries={"max_attempts": 0}),
+        config=BotoConfig(read_timeout=900, retries={"total_max_attempts": 1}),
     )
 
     prompt = (
@@ -116,7 +116,7 @@ def main():
         data = line[6:] if line.startswith("data: ") else line
         try:
             parsed = json.loads(data)
-        except (json.JSONDecodeError, TypeError):
+        except json.JSONDecodeError, TypeError:
             return
         if not isinstance(parsed, dict):
             return
@@ -157,18 +157,16 @@ def main():
         if buffer.strip():
             _handle_line(buffer)
     except (ResponseStreamingError, ProtocolError, IncompleteRead) as e:
-        # Long pipelines (>2 min) can outlast the HTTP read connection, which closes
-        # mid-stream with IncompleteRead. The runtime keeps executing server-side; this
-        # is a CLIENT-side disconnect, not a pipeline failure. Flush what we buffered and
-        # confirm the real outcome in CloudWatch / DynamoDB, not the stream's clean close.
+        # The AgentCore app cancels its producer when the response consumer disconnects.
+        # A partial stream is not a successful invocation and must be retried.
         disconnected = True
         if buffer.strip():
             _handle_line(buffer)
-        print(f"\n[client disconnect after {time.time() - t0:.0f}s — runtime continues server-side] {type(e).__name__}")
+        print(f"\n[client disconnect after {time.time() - t0:.0f}s - invocation cancelled] {type(e).__name__}")
     except Exception as e:
         print(f"\nStream error: {type(e).__name__}: {e}")
     if disconnected:
-        print("NOTE: verify final result in CloudWatch logs / DynamoDB, not the client stream.")
+        print("NOTE: partial output is invalid. Rerun the invocation after resolving the stream error.")
 
     elapsed = time.time() - t0
     print()

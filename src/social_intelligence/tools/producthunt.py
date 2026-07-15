@@ -15,6 +15,12 @@ from ._secrets import get_secret
 logger = logging.getLogger(__name__)
 
 _VALID_ORDERS = {"VOTES", "RANKING", "NEWEST", "FEATURED_AT"}
+_PRODUCT_HUNT_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9._~-]+$")
+
+
+def _valid_product_hunt_token(value: str) -> bool:
+    """Return whether a token is safe to send as an HTTP Bearer credential."""
+    return bool(_PRODUCT_HUNT_TOKEN_PATTERN.fullmatch(value))
 
 
 def handle(params: dict) -> dict:
@@ -30,9 +36,16 @@ def handle(params: dict) -> dict:
     limit = max(1, min(int(params.get("limit", 10)), 20))
     featured = params.get("featured")
 
-    token = get_secret("social-intel/producthunt-api-token")
-    if not token:
-        return {"posts": [], "error": "No PH token"}
+    try:
+        token = get_secret("social-intel/producthunt-api-token").strip()
+    except Exception:
+        logger.info("Product Hunt token secret unavailable; skipping Product Hunt discovery")
+        return {"posts": [], "count": 0, "source": "Product Hunt", "error": "not_configured"}
+    if not _valid_product_hunt_token(token):
+        # The stack's initial random value is not a Product Hunt token. Skip the
+        # call rather than generating repeated 401s until an operator configures it.
+        logger.info("Product Hunt token is not configured; skipping Product Hunt discovery")
+        return {"posts": [], "count": 0, "source": "Product Hunt", "error": "not_configured"}
 
     query = """
     query($order: PostsOrder!, $first: Int!, $topic: String, $featured: Boolean) {
