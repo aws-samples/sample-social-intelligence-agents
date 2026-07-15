@@ -29,7 +29,7 @@ infra = [
     "aws-cdk-lib==2.261.0",
     "constructs==10.6.0",
     "cdk-nag==2.38.2",
-    "pip>=25.0,<26.0",
+    "pip>=26.1.2,<27.0",
 ]
 demo = [
     "streamlit==1.45.0",
