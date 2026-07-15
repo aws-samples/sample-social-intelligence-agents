@@ -48,7 +48,11 @@ MAX_LEADS_PER_RUN = _bounded_int_env("MAX_LEADS_PER_RUN", 3, 1, 50)
 # leave sufficient room for a complete response without permitting unbounded retries.
 TREND_MAX_TOKENS = _bounded_int_env("TREND_MAX_TOKENS", 8192, 1024, 32768)
 SEARCH_MAX_TOKENS = _bounded_int_env("SEARCH_MAX_TOKENS", 8192, 1024, 32768)
-ANALYSIS_MAX_TOKENS = _bounded_int_env("ANALYSIS_MAX_TOKENS", 4096, 1024, 32768)
+# The analysis agent emits the largest structured output of the four: a ScoredProspectList
+# of up to five prospects, each with a six-field score_breakdown, reasoning, an enrichment
+# summary, and up to four evidence items. A 4096 ceiling truncated that payload mid-generation
+# and raised MaxTokensReachedException, so keep it at 8192 to fit the full typed contract.
+ANALYSIS_MAX_TOKENS = _bounded_int_env("ANALYSIS_MAX_TOKENS", 8192, 1024, 32768)
 
 # Graph and Swarm share the same three-attempt transient model retry policy. With the
 # default 300-second event-stream read timeout, 960 seconds reserves three socket-read
