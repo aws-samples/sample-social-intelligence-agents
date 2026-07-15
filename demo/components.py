@@ -12,6 +12,7 @@ from config import (
     SCORE_MID_THRESHOLD,
     TOOL_LABELS,
 )
+from data import normalize_trends
 from markupsafe import escape as _esc
 
 # ---------------------------------------------------------------------------
@@ -310,11 +311,8 @@ def render_lead_card(lead: dict) -> None:
         else ""
     )
 
-    trends = lead.get("top_trends", "")
-    trend_tags = ""
-    if trends:
-        tags = [t.strip() for t in str(trends).split(",") if t.strip()][:4]
-        trend_tags = "".join(f'<span class="tag-badge">{_esc(tag)}</span>' for tag in tags)
+    tags = normalize_trends(lead.get("top_trends"))[:4]
+    trend_tags = "".join(f'<span class="tag-badge">{_esc(tag)}</span>' for tag in tags)
 
     st.markdown(
         f'<div class="lead-card {cls}">'

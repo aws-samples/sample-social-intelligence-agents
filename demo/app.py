@@ -42,7 +42,7 @@ from config import (  # noqa: E402
     SCORE_MID_THRESHOLD,
     VERTICALS,
 )
-from data import check_config, get_existing_lead_ids, get_leads  # noqa: E402
+from data import check_config, get_existing_lead_ids, get_leads, normalize_trends  # noqa: E402
 from streaming import invoke_agentcore_streaming  # noqa: E402
 
 from social_intelligence.tools.email_renderer import render_email_html  # noqa: E402
@@ -513,10 +513,10 @@ with tab_emails:
                 unsafe_allow_html=True,
             )
 
-            trends = lead.get("top_trends", "")
-            if trends:
+            trend_list = normalize_trends(lead.get("top_trends"))
+            if trend_list:
                 st.markdown("#### Trending Signals")
-                for t in [x.strip() for x in str(trends).split(",") if x.strip()][:5]:
+                for t in trend_list[:5]:
                     st.markdown(
                         f'<span class="tag-badge" style="margin:2px 0;">{_esc(t)}</span>',
                         unsafe_allow_html=True,
@@ -531,8 +531,7 @@ with tab_emails:
             st.markdown(f"**Subject:** {lead.get('email_subject', '')}")
             st.divider()
 
-            tokens = lead.get("top_trends", "")
-            token_list = [t.strip() for t in tokens.split(",") if t.strip()] if tokens else []
+            token_list = normalize_trends(lead.get("top_trends"))
 
             html_result = render_email_html(
                 prospect_id=lead.get("prospect_id", ""),

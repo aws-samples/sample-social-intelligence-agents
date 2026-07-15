@@ -19,13 +19,14 @@ import uuid
 import bedrock_agentcore  # noqa: F401 (registers the service model with botocore)
 import boto3
 
-REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+from social_intelligence.config import AWS_REGION
+
 AGENT_ARN = os.environ["AGENTCORE_AGENT_ARN"]
 
 
 def run_swarm(prompt: str, session_id: str = "") -> str:
     """Invoke the deployed agent with swarm pattern and stream results."""
-    client = boto3.client("bedrock-agentcore", region_name=REGION)
+    client = boto3.client("bedrock-agentcore", region_name=AWS_REGION)
     sid = session_id or str(uuid.uuid4())
 
     payload = json.dumps({"prompt": prompt, "pattern": "swarm"}).encode()

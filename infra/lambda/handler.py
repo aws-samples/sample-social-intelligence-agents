@@ -70,7 +70,7 @@ def _get_tool_name(event, context):
             tool_name = custom["bedrockAgentCoreToolName"]
             logger.info("Gateway tool_name from context: %s", tool_name)
             return tool_name
-    except (AttributeError, TypeError):
+    except AttributeError, TypeError:
         pass
 
     # API Gateway proxy integration: route from path

@@ -56,6 +56,7 @@ temp_scan/
 .holmes/
 .holmesignore
 benchmark_results.csv
+benchmark_human_review.csv
 
 # Gateway config (contains environment-specific values)
 gateway_config.json

@@ -3,6 +3,8 @@
 import logging
 import re
 
+import httpx
+
 from ._http import get_with_retry
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,25 @@ def handle(params: dict) -> dict:
             follow_redirects=True,
         )
         resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            logger.info("Wikipedia has no summary for topic '%s'", topic)
+            return {
+                "title": "",
+                "extract": "",
+                "url": "",
+                "description": "",
+                "source": "Wikipedia",
+            }
+        logger.exception("Wikipedia API error for topic '%s'", topic)
+        return {
+            "title": "",
+            "extract": "",
+            "url": "",
+            "description": "",
+            "source": "Wikipedia",
+            "error": "upstream_error",
+        }
     except Exception:
         logger.exception("Wikipedia API error for topic '%s'", topic)
         return {

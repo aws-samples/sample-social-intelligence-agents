@@ -17,9 +17,9 @@ Architecture:
 import os
 import shutil
 import subprocess  # nosec B404
+import sys
 
 import aws_cdk as cdk
-import aws_cdk.aws_bedrock_agentcore_alpha as agentcore
 import cdk_nag
 from aws_cdk import (
     Duration,
@@ -30,6 +30,9 @@ from aws_cdk import (
 )
 from aws_cdk import (
     aws_bedrock as bedrock,
+)
+from aws_cdk import (
+    aws_bedrockagentcore as agentcore,
 )
 from aws_cdk import (
     aws_dynamodb as dynamodb,
@@ -61,12 +64,68 @@ from gateway_stack import build_tools_gateway
 SECRETS_PREFIX = os.environ.get("SECRETS_PREFIX", "social-intel")
 TABLE_PREFIX = os.environ.get("TABLE_PREFIX", "social-intel")
 
+# Default agent model. The "global." inference profile resolves in every supported
+# Region (US and EU), so the deployed runtime works out of the box regardless of the
+# deploy Region. Override MODEL_ID (or the per-agent *_MODEL_ID vars) at deploy time to
+# pin a Region-scoped profile ("us." / "eu.") or tier models per agent for cost.
+DEFAULT_MODEL_ID = "global.anthropic.claude-sonnet-4-6"
+# Per-agent model env vars threaded from deploy env into the Runtime. Only vars that are
+# actually set are forwarded, so unset ones fall back to the app-side config.py default.
+MODEL_ENV_VARS = ("MODEL_ID", "TREND_MODEL_ID", "SEARCH_MODEL_ID", "ANALYSIS_MODEL_ID", "EMAIL_MODEL_ID")
+# Non-model runtime tuning is opt-in at deploy time. These values are read by the
+# application process, so they must be explicitly copied into the AgentCore Runtime.
+RUNTIME_ENV_VARS = (
+    "ANALYSIS_MAX_TOKENS",
+    "BEDROCK_READ_TIMEOUT_SECONDS",
+    "COMPLIANCE_FOOTER_REQUIRED",
+    "EMAIL_APPROVAL_REQUIRED",
+    "EMAIL_SCORE_THRESHOLD",
+    "GROUNDING_MIN_SCORE",
+    "LOG_LEVEL",
+    "MAX_LEADS_PER_RUN",
+    "MIN_INDEPENDENT_SOURCES",
+    "ORCHESTRATION_NODE_TIMEOUT_SECONDS",
+    "SEARCH_MAX_TOKENS",
+    "TREND_MAX_TOKENS",
+)
+
+
+def _leads_gsi_count() -> int:
+    """Return how many lead-table GSIs to include in this CDK deployment.
+
+    Fresh deployments create every index atomically. An older deployed stack
+    can set ``GSI_MIGRATION_STAGE`` to 1, then 2, then 3 across separate
+    CloudFormation updates, which respects DynamoDB's one-GSI update limit.
+    """
+    raw_stage = os.environ.get("GSI_MIGRATION_STAGE", "").strip()
+    if not raw_stage:
+        return 3
+    try:
+        stage = int(raw_stage)
+    except ValueError as exc:
+        raise ValueError("GSI_MIGRATION_STAGE must be 1, 2, or 3") from exc
+    if stage not in (1, 2, 3):
+        raise ValueError("GSI_MIGRATION_STAGE must be 1, 2, or 3")
+    return stage
+
+
+def _remove_python_cache_files(directory: str) -> None:
+    """Remove bytecode files so CDK asset hashes are deterministic across synths."""
+    for root, directories, files in os.walk(directory):
+        if "__pycache__" in directories:
+            shutil.rmtree(os.path.join(root, "__pycache__"), ignore_errors=True)
+            directories.remove("__pycache__")
+        for filename in files:
+            if filename.endswith((".pyc", ".pyo")):
+                os.remove(os.path.join(root, filename))
+
 
 class SocialIntelligenceStack(Stack):
     """Tools infrastructure — Lambda + API Gateway + Amazon Bedrock AgentCore Gateway + Runtime."""
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 
         # Env-gated removal policy: keep data in non-dev environments.
         removal = cdk.RemovalPolicy.DESTROY if os.environ.get("CDK_ENV") == "dev" else cdk.RemovalPolicy.RETAIN
@@ -92,20 +151,52 @@ class SocialIntelligenceStack(Stack):
             partition_key=dynamodb.Attribute(name="prospect_id", type=dynamodb.AttributeType.STRING),
             sort_key=dynamodb.Attribute(name="discovered_at", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery=True,
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                point_in_time_recovery_enabled=True
+            ),
             encryption=dynamodb.TableEncryption.CUSTOMER_MANAGED,
             encryption_key=leads_key,
             time_to_live_attribute="expires_at",
             removal_policy=removal,
         )
 
-        # Global secondary index for case-insensitive product-name dedup lookups.
-        # Replaces an O(n) table scan with an O(1) query in the agent-side tool.
-        leads_table.add_global_secondary_index(
-            index_name="product-name-index",
-            partition_key=dynamodb.Attribute(name="product_name_lower", type=dynamodb.AttributeType.STRING),
-            projection_type=dynamodb.ProjectionType.KEYS_ONLY,
-        )
+        # Fresh tables create every GSI atomically. DynamoDB permits only one
+        # add/delete operation per update, so old stacks add them in three explicit
+        # CloudFormation stages via GSI_MIGRATION_STAGE. Never create them out of band:
+        # CloudFormation must remain the owner of these table properties.
+        gsi_count = _leads_gsi_count()
+
+        # 1. Case-insensitive product-name dedup lookups. Replaces an O(n) table scan
+        #    with an O(1) query in the agent-side tool.
+        if gsi_count >= 1:
+            leads_table.add_global_secondary_index(
+                index_name="product-name-index",
+                partition_key=dynamodb.Attribute(name="product_name_lower", type=dynamodb.AttributeType.STRING),
+                projection_type=dynamodb.ProjectionType.KEYS_ONLY,
+            )
+
+        # 2. Ordered read path for the runtime skip list and check_existing_leads().
+        #    Every persisted lead writes dedup_partition="LEAD", allowing a bounded,
+        #    newest-first query instead of an unordered table scan.
+        if gsi_count >= 2:
+            leads_table.add_global_secondary_index(
+                index_name="dedup-partition-discovered-at-index",
+                partition_key=dynamodb.Attribute(name="dedup_partition", type=dynamodb.AttributeType.STRING),
+                sort_key=dynamodb.Attribute(name="discovered_at", type=dynamodb.AttributeType.STRING),
+                projection_type=dynamodb.ProjectionType.INCLUDE,
+                non_key_attributes=["product_name", "session_id", "score"],
+            )
+
+        # 3. Evaluation reads a run's records by session_id. This targeted index avoids
+        #    scanning the full lead table as evaluation history grows.
+        if gsi_count >= 3:
+            leads_table.add_global_secondary_index(
+                index_name="session-id-discovered-at-index",
+                partition_key=dynamodb.Attribute(name="session_id", type=dynamodb.AttributeType.STRING),
+                sort_key=dynamodb.Attribute(name="discovered_at", type=dynamodb.AttributeType.STRING),
+                projection_type=dynamodb.ProjectionType.INCLUDE,
+                non_key_attributes=["email_body", "score", "product_name"],
+            )
 
         # -----------------------------------------------------------------
         # DynamoDB table — crawl frontier (dedup + scheduling for signal sources)
@@ -116,6 +207,9 @@ class SocialIntelligenceStack(Stack):
             table_name=f"{TABLE_PREFIX}-frontier",
             partition_key=dynamodb.Attribute(name="claim_key", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                point_in_time_recovery_enabled=True
+            ),
             encryption=dynamodb.TableEncryption.CUSTOMER_MANAGED,
             encryption_key=leads_key,
             time_to_live_attribute="expires_at",
@@ -125,12 +219,14 @@ class SocialIntelligenceStack(Stack):
         # -----------------------------------------------------------------
         # Secrets Manager — third-party API credentials (CMK-encrypted)
         # -----------------------------------------------------------------
-        # Secrets are created empty with a placeholder. After deploy, fill the
-        # real values WITHOUT routing them through CloudFormation or an LLM:
+        # Secrets Manager creates a random bootstrap value. Each consuming tool
+        # validates its provider-specific credential format and treats that initial
+        # value as unconfigured, so it is never sent to an external API. After deploy,
+        # set real values WITHOUT routing them through CloudFormation or an LLM:
         #   aws secretsmanager put-secret-value \
         #     --secret-id social-intel/youtube-api-key --secret-string "<KEY>"
-        # All four tools degrade gracefully when a secret is empty/absent, so the
-        # sample runs with zero credentials configured. The secret_name matches
+        # All four tools degrade gracefully when a secret is absent or unconfigured,
+        # so the sample runs with zero credentials configured. The secret_name matches
         # the secret_id read by src/social_intelligence/tools/_secrets.py.
         api_secrets: dict[str, secretsmanager.Secret] = {}
         for logical_id, secret_name in (
@@ -164,12 +260,12 @@ class SocialIntelligenceStack(Stack):
                 # SUMMARIZATION strategy requires {sessionId} in the namespace
                 # (per-session summaries), per AgentCore validation.
                 agentcore.MemoryStrategy.using_summarization(
-                    name="prospect_run_summary",
+                    strategy_name="prospect_run_summary",
                     description="Summarizes scored prospects and outreach outcomes per run",
                     namespaces=["/actors/{actorId}/sessions/{sessionId}/prospects"],
                 ),
                 agentcore.MemoryStrategy.using_semantic(
-                    name="brand_knowledge",
+                    strategy_name="brand_knowledge",
                     description="Brand voice and ICP facts for outreach personalization",
                     namespaces=["/actors/{actorId}/brand"],
                 ),
@@ -179,13 +275,14 @@ class SocialIntelligenceStack(Stack):
         # -----------------------------------------------------------------
         # Bundle Lambda code + deps
         # -----------------------------------------------------------------
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         lambda_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "lambda")
         bundle_dir = os.path.join(lambda_dir, ".bundle")
         os.makedirs(bundle_dir, exist_ok=True)
 
         subprocess.check_call(
             [  # nosec B603 B607
+                sys.executable,
+                "-m",
                 "pip",
                 "install",
                 "-r",
@@ -194,8 +291,15 @@ class SocialIntelligenceStack(Stack):
                 bundle_dir,
                 "--upgrade",
                 "--quiet",
+                "--no-compile",
                 "--platform",
                 "manylinux2014_aarch64",
+                "--python-version",
+                "3.14",
+                "--implementation",
+                "cp",
+                "--abi",
+                "cp314",
                 "--only-binary=:all:",
             ]
         )
@@ -222,6 +326,7 @@ class SocialIntelligenceStack(Stack):
                 "email_renderer.py",  # Agent-side — HTML rendering
             ),
         )
+        _remove_python_cache_files(bundle_dir)
 
         # -----------------------------------------------------------------
         # AWS Lambda function
@@ -230,7 +335,7 @@ class SocialIntelligenceStack(Stack):
             self,
             "ToolsHandler",
             function_name="social-intel-tools",
-            runtime=lambda_.Runtime.PYTHON_3_13,
+            runtime=lambda_.Runtime.PYTHON_3_14,
             handler="handler.handler",
             code=lambda_.Code.from_asset(bundle_dir),
             timeout=Duration.seconds(60),
@@ -312,8 +417,8 @@ class SocialIntelligenceStack(Stack):
         )
 
         # -----------------------------------------------------------------
-        # Amazon Bedrock AgentCore Gateway — IAM auth + Lambda target (CDK L2 constructs)
-        # Built in gateway_stack.py. Register new data sources there.
+        # Amazon Bedrock AgentCore Gateway — IAM auth + Lambda target (CDK L2 constructs).
+        # The target discovers every declared tool from tool_schema.json.
         # -----------------------------------------------------------------
         gateway = build_tools_gateway(
             self,
@@ -396,7 +501,7 @@ class SocialIntelligenceStack(Stack):
             self,
             "SocialIntelGuardrailVersion",
             guardrail_identifier=guardrail.attr_guardrail_id,
-            description="social-intel guardrail v2 — drop PROMPT_ATTACK filter (false-positive on benign prompts)",
+            description="social-intel guardrail v2 - drop PROMPT_ATTACK filter (false-positive on benign prompts)",
         )
 
         # -----------------------------------------------------------------
@@ -409,50 +514,59 @@ class SocialIntelligenceStack(Stack):
             shutil.rmtree(agent_bundle_dir)
         os.makedirs(agent_bundle_dir, exist_ok=True)
 
-        # Copy agent entrypoint and source package
+        # Copy the entrypoint. The project package itself is installed from the
+        # frozen runtime export below, avoiding duplicate source trees in the asset.
         shutil.copy2(os.path.join(project_root, "entrypoint.py"), agent_bundle_dir)
-        shutil.copytree(
-            os.path.join(project_root, "src"),
-            os.path.join(agent_bundle_dir, "src"),
-            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-        )
 
-        # Install runtime dependencies for the AgentCore Runtime's target platform
-        # (linux/aarch64). Dependencies with compiled extensions (e.g. pydantic_core)
-        # must be ARM64 wheels. Pin the ABI to py312 so pip fetches the matching
-        # cp312 manylinux aarch64 wheel that actually contains the native .so.
+        # Install the exact, CI-verified runtime dependency graph for AgentCore's
+        # linux/aarch64 Python 3.14 environment. pip otherwise ignores uv.lock and
+        # re-resolves broad constraints to untested versions during every synth.
+        runtime_requirements = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "runtime-requirements.txt",
+        )
         subprocess.check_call(
             [  # nosec B603 B607
+                sys.executable,
+                "-m",
                 "pip",
                 "install",
-                project_root,
+                "-r",
+                runtime_requirements,
                 "-t",
                 agent_bundle_dir,
                 "--upgrade",
                 "--quiet",
+                "--no-compile",
                 "--platform",
                 "manylinux2014_aarch64",
                 "--python-version",
-                "3.12",
+                "3.14",
                 "--implementation",
                 "cp",
                 "--abi",
-                "cp312",
+                "cp314",
                 "--only-binary=:all:",
             ]
         )
+        subprocess.check_call(
+            [  # nosec B603 B607
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                project_root,
+                "--no-deps",
+                "-t",
+                agent_bundle_dir,
+                "--upgrade",
+                "--quiet",
+                "--no-compile",
+            ]
+        )
 
-        # Strip Python cache files from the bundle. pip install -t leaves
-        # __pycache__/*.pyc in the dependency tree, and the AgentCore Runtime
-        # rejects artifacts containing cache files incompatible with its
-        # interpreter. Prune them so the uploaded artifact is clean.
-        for _root, _dirs, _files in os.walk(agent_bundle_dir):
-            if "__pycache__" in _dirs:
-                shutil.rmtree(os.path.join(_root, "__pycache__"), ignore_errors=True)
-                _dirs.remove("__pycache__")
-            for _f in _files:
-                if _f.endswith((".pyc", ".pyo")):
-                    os.remove(os.path.join(_root, _f))
+        # Do not ship host-specific bytecode in either deployment artifact.
+        _remove_python_cache_files(agent_bundle_dir)
 
         agent_code_asset = s3_assets.Asset(
             self,
@@ -465,8 +579,32 @@ class SocialIntelligenceStack(Stack):
                 bucket_name=agent_code_asset.s3_bucket_name,
                 object_key=agent_code_asset.s3_object_key,
             ),
-            agentcore.AgentCoreRuntime.PYTHON_3_12,
+            agentcore.AgentCoreRuntime.PYTHON_3_14,
+            # Strands emits OpenTelemetry natively. AgentCore Runtime tracing exports
+            # those spans, so a second opentelemetry-instrument launcher is unnecessary.
             ["entrypoint.py"],
+        )
+
+        # Model configuration threaded into the Runtime. MODEL_ID always gets an explicit
+        # value (deploy-env override or the Region-agnostic global default) so the deployed
+        # runtime never silently depends on a Region-locked app-side fallback. Per-agent
+        # overrides are forwarded only when set at deploy time.
+        model_env = {"MODEL_ID": os.environ.get("MODEL_ID", DEFAULT_MODEL_ID)}
+        model_env.update({v: os.environ[v] for v in MODEL_ENV_VARS if v != "MODEL_ID" and os.environ.get(v)})
+        runtime_env = {name: os.environ[name] for name in RUNTIME_ENV_VARS if os.environ.get(name)}
+        runtime_application_log_group = logs.LogGroup(
+            self,
+            "RuntimeApplicationLogGroup",
+            log_group_name="/aws/bedrock-agentcore/social-intelligence/application",
+            retention=logs.RetentionDays.THREE_MONTHS,
+            removal_policy=removal,
+        )
+        runtime_usage_log_group = logs.LogGroup(
+            self,
+            "RuntimeUsageLogGroup",
+            log_group_name="/aws/bedrock-agentcore/social-intelligence/usage",
+            retention=logs.RetentionDays.THREE_MONTHS,
+            removal_policy=removal,
         )
 
         runtime = agentcore.Runtime(
@@ -474,7 +612,10 @@ class SocialIntelligenceStack(Stack):
             "AgentRuntime",
             runtime_name="social_intel",
             agent_runtime_artifact=agent_artifact,
-            description="Multi-agent social intelligence system",
+            # AgentCore's resource provider can miss an update when only an S3 artifact
+            # key changes. Include the immutable asset hash in a mutable Runtime field so
+            # every code revision produces a provider-visible deployment update.
+            description=f"Multi-agent social intelligence system (build {agent_code_asset.asset_hash[:12]})",
             environment_variables={
                 "GATEWAY_URL": gateway.gateway_url,
                 "AWS_DEFAULT_REGION": cdk.Aws.REGION,
@@ -483,6 +624,13 @@ class SocialIntelligenceStack(Stack):
                 "GUARDRAIL_ID": guardrail.attr_guardrail_id,
                 "GUARDRAIL_VERSION": cfn_guardrail_version.attr_version,
                 "FRONTIER_TABLE_NAME": frontier_table.table_name,
+                # CloudFormation's AgentCore resource provider can miss a change that
+                # only updates the artifact S3 key during change-set calculation.
+                # Thread the immutable asset key through a harmless runtime setting so
+                # every code revision is an explicit, deployable resource update.
+                "RUNTIME_ARTIFACT_KEY": agent_code_asset.s3_object_key,
+                **model_env,
+                **runtime_env,
             },
             # Explicit IAM auth — callers must sign requests with SigV4
             authorizer_configuration=agentcore.RuntimeAuthorizerConfiguration.using_iam(),
@@ -490,6 +638,19 @@ class SocialIntelligenceStack(Stack):
             network_configuration=agentcore.RuntimeNetworkConfiguration.using_public_network(),
             # HTTP protocol — BedrockAgentCoreApp uses HTTP streaming
             protocol_configuration=agentcore.ProtocolType.HTTP,
+            # Service traces and Strands' built-in OpenTelemetry spans are delivered
+            # to CloudWatch. Transaction Search remains an account-level prerequisite.
+            tracing_enabled=True,
+            logging_configs=[
+                agentcore.LoggingConfig(
+                    log_type=agentcore.LogType.APPLICATION_LOGS,
+                    destination=agentcore.LoggingDestination.cloud_watch_logs(runtime_application_log_group),
+                ),
+                agentcore.LoggingConfig(
+                    log_type=agentcore.LogType.USAGE_LOGS,
+                    destination=agentcore.LoggingDestination.cloud_watch_logs(runtime_usage_log_group),
+                ),
+            ],
             # Lifecycle — auto-terminate idle sessions and cap instance lifetime
             lifecycle_configuration=agentcore.LifecycleConfiguration(
                 idle_runtime_session_timeout=Duration.minutes(15),
@@ -515,7 +676,8 @@ class SocialIntelligenceStack(Stack):
         # model in every routed region (wildcard region required per AWS docs).
         # Scoped to the Anthropic Claude family (not Resource:"*") so the documented
         # per-agent model tiering (MODEL_ID / *_MODEL_ID env overrides, e.g. Haiku for
-        # triage) works without re-editing IAM. The default is us.anthropic.claude-sonnet-4-6.
+        # triage) works without re-editing IAM. The default is global.anthropic.claude-sonnet-4-6;
+        # the global. and us. profile ARNs plus the base foundation model are all covered below.
         runtime.add_to_role_policy(
             iam.PolicyStatement(
                 actions=[
@@ -523,15 +685,34 @@ class SocialIntelligenceStack(Stack):
                     "bedrock:InvokeModelWithResponseStream",
                 ],
                 resources=[
-                    f"arn:aws:bedrock:*:{cdk.Aws.ACCOUNT_ID}:inference-profile/us.anthropic.claude-*",
                     f"arn:aws:bedrock:*:{cdk.Aws.ACCOUNT_ID}:inference-profile/global.anthropic.claude-*",
+                    f"arn:aws:bedrock:*:{cdk.Aws.ACCOUNT_ID}:inference-profile/us.anthropic.claude-*",
+                    f"arn:aws:bedrock:*:{cdk.Aws.ACCOUNT_ID}:inference-profile/eu.anthropic.claude-*",
                     "arn:aws:bedrock:*::foundation-model/anthropic.claude-*",
                 ],
             )
         )
 
+        # Converse requests with an inline guardrailConfig still require this IAM
+        # authorization. This does not add a separate ApplyGuardrail API call or its
+        # own request path; it authorizes enforcement within ConverseStream.
+        runtime.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["bedrock:ApplyGuardrail"],
+                resources=[guardrail.attr_guardrail_arn],
+            )
+        )
+
         # Grant Runtime DynamoDB access for lead storage
         leads_table.grant_read_write_data(runtime)
+        # Lead persistence uses TransactWriteItems to reserve product and prospect
+        # identities atomically before recording a timestamped lead row.
+        runtime.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["dynamodb:TransactWriteItems"],
+                resources=[leads_table.table_arn],
+            )
+        )
 
         # Grant Runtime scoped read+write access to AgentCore Memory (no delete/admin)
         agent_memory.grant_read(runtime)
@@ -539,14 +720,6 @@ class SocialIntelligenceStack(Stack):
 
         # Grant Runtime DynamoDB access to the frontier table
         frontier_table.grant_read_write_data(runtime)
-
-        # Grant Runtime permission to apply the Bedrock Guardrail
-        runtime.add_to_role_policy(
-            iam.PolicyStatement(
-                actions=["bedrock:ApplyGuardrail"],
-                resources=[guardrail.attr_guardrail_arn],
-            )
-        )
 
         # NOTE: The Runtime role is intentionally NOT granted Secrets Manager access.
         # The four credential-consuming tools (youtube, producthunt, github, reddit)
@@ -567,6 +740,18 @@ class SocialIntelligenceStack(Stack):
         cdk.CfnOutput(self, "GatewayId", value=gateway.gateway_id)
         cdk.CfnOutput(self, "RuntimeArn", value=runtime.agent_runtime_arn)
         cdk.CfnOutput(self, "RuntimeId", value=runtime.agent_runtime_id)
+        cdk.CfnOutput(
+            self,
+            "RuntimeApplicationLogGroupName",
+            value=runtime_application_log_group.log_group_name,
+            description="Application event log group used by AgentCore Observability evaluation.",
+        )
+        cdk.CfnOutput(
+            self,
+            "RuntimeUsageLogGroupName",
+            value=runtime_usage_log_group.log_group_name,
+            description="AgentCore Runtime usage log group.",
+        )
         cdk.CfnOutput(self, "EndpointArn", value=endpoint.agent_runtime_endpoint_arn)
         cdk.CfnOutput(self, "LeadsTableName", value=leads_table.table_name)
         cdk.CfnOutput(self, "FrontierTableName", value=frontier_table.table_name)
@@ -627,7 +812,7 @@ class SocialIntelligenceStack(Stack):
                 ),
                 cdk_nag.NagPackSuppression(
                     id="AwsSolutions-L1",
-                    reason="Python 3.13 is the latest stable runtime. 3.14 is preview-only.",
+                    reason="Python 3.14 is the current Lambda runtime baseline.",
                 ),
             ],
             apply_to_children=True,
@@ -721,23 +906,19 @@ class SocialIntelligenceStack(Stack):
             apply_to_children=True,
         )
 
-        # Guardrail IAM policy: bedrock:ApplyGuardrail is scoped to the specific guardrail ARN;
-        # the Memory grant may emit IAM5 for resource-level wildcards on the memory resource.
+        # AgentCore Memory grants may emit IAM5 for resource-level wildcards on the
+        # memory sub-resources, which the current CDK construct requires.
         cdk_nag.NagSuppressions.add_resource_suppressions(
             runtime,
             [
                 cdk_nag.NagPackSuppression(
                     id="AwsSolutions-IAM5",
                     reason=(
-                        "bedrock:ApplyGuardrail is scoped to the specific guardrail ARN. "
                         "AgentCore Memory grant_read/grant_write may use wildcards on "
                         "sub-resources of the memory ARN, which is the minimum required "
                         "by the AgentCore Memory CDK construct."
                     ),
-                    applies_to=[
-                        f"Resource::{guardrail.attr_guardrail_arn}",
-                        "Resource::*",
-                    ],
+                    applies_to=["Resource::*"],
                 ),
             ],
             apply_to_children=True,

@@ -13,8 +13,9 @@ from data import get_boto_session
 # Update the status banner every N events so the UI never looks frozen.
 _STATUS_UPDATE_INTERVAL = 3
 
-# Maximum wall-clock seconds for the entire streaming response. After this,
-# the loop breaks and returns whatever partial results have been collected.
+# Maximum wall-clock seconds for the entire streaming response. Ending a response
+# locally cancels the AgentCore application generator, so timeout is reported as a
+# failed invocation rather than presenting partial output as a completed result.
 # AgentCore's own timeout is 60 min; this caps the Streamlit wait at 25 min.
 _STREAM_WALL_CLOCK_TIMEOUT = 1500.0  # 25 minutes
 
@@ -57,7 +58,7 @@ def invoke_agentcore_streaming(
     client = session.client(
         "bedrock-agentcore",
         region_name=AWS_REGION,
-        config=BotoConfig(read_timeout=900, retries={"max_attempts": 0}),
+        config=BotoConfig(read_timeout=int(_STREAM_WALL_CLOCK_TIMEOUT + 60), retries={"max_attempts": 0}),
     )
 
     payload = json.dumps(
@@ -85,6 +86,7 @@ def invoke_agentcore_streaming(
     active_tools: dict[str, str] = {}
     started_nodes: set[str] = set()
     ended_nodes: set[str] = set()
+    pipeline_completed = False
 
     body = response.get("response")
     if body is None:
@@ -117,8 +119,11 @@ def invoke_agentcore_streaming(
                 _append_event(
                     events,
                     {
-                        "type": "info",
-                        "message": f"Stream timeout ({int(_STREAM_WALL_CLOCK_TIMEOUT)}s) — partial results shown above",
+                        "type": "error",
+                        "message": (
+                            f"Stream timeout ({int(_STREAM_WALL_CLOCK_TIMEOUT)}s) - "
+                            "AgentCore cancelled the unfinished invocation; rerun it."
+                        ),
                         "ts": time.time(),
                     },
                     live_container,
@@ -187,6 +192,7 @@ def invoke_agentcore_streaming(
                 _parse_node_stream(parsed, events, active_tools, live_container, status_placeholder)
 
             elif evt_type == "multiagent_result":
+                pipeline_completed = True
                 _append_event(
                     events,
                     {"type": "pipeline_end", "ts": time.time()},
@@ -201,18 +207,40 @@ def invoke_agentcore_streaming(
         if "IncompleteRead" in err_name or "ResponseStreamingError" in str(stream_err):
             _append_event(
                 events,
-                {"type": "info", "message": "Stream ended -- results shown above", "ts": time.time()},
+                {
+                    "type": "error",
+                    "message": (
+                        "Response stream disconnected - AgentCore cancelled the unfinished invocation; rerun it."
+                    ),
+                    "ts": time.time(),
+                },
                 live_container,
                 status_placeholder,
             )
         else:
-            msg = f"Stream error: {err_name} -- partial results shown above"
+            msg = f"Stream error: {err_name} - invocation did not complete"
             _append_event(
                 events,
                 {"type": "error", "message": msg, "ts": time.time()},
                 live_container,
                 status_placeholder,
             )
+    finally:
+        close = getattr(body, "close", None)
+        if callable(close):
+            close()
+
+    if not pipeline_completed:
+        _append_event(
+            events,
+            {
+                "type": "error",
+                "message": "Response ended without a terminal pipeline result; rerun the invocation.",
+                "ts": time.time(),
+            },
+            live_container,
+            status_placeholder,
+        )
 
     # Mark any nodes that started but never received a stop/complete event
     for nid in started_nodes - ended_nodes:

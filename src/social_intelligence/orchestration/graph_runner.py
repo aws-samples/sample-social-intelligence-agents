@@ -2,9 +2,7 @@
 
 The Graph pattern uses a deterministic DAG:
 
-    research ──┐
-               ├──→ analysis (waits for BOTH) ──→ email (if score ≥ 60)
-    search   ──┘
+    research ──→ search ──→ analysis ──→ email (if score ≥ 60)
 
 Usage:
     export AGENTCORE_AGENT_ARN=arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/my-runtime
@@ -23,13 +21,14 @@ import uuid
 import bedrock_agentcore  # noqa: F401 (registers the service model with botocore)
 import boto3
 
-REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+from social_intelligence.config import AWS_REGION
+
 AGENT_ARN = os.environ["AGENTCORE_AGENT_ARN"]
 
 
 def run_graph(prompt: str, session_id: str = "") -> str:
     """Invoke the deployed agent with graph pattern and stream results."""
-    client = boto3.client("bedrock-agentcore", region_name=REGION)
+    client = boto3.client("bedrock-agentcore", region_name=AWS_REGION)
     sid = session_id or str(uuid.uuid4())
 
     payload = json.dumps({"prompt": prompt, "pattern": "graph"}).encode()

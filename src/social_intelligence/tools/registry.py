@@ -4,10 +4,8 @@ Single source of truth for tool routing. Used by:
 - Lambda handler (deployed): routes Amazon Bedrock AgentCore Gateway / Amazon API
   Gateway requests to handlers
 
-Adding a new tool:
-1. Create tools/<name>.py with a handle(params: dict) -> dict function
-2. Add the route to ROUTES below
-3. Add the tool definition to schemas/tool_schema.json
+To add a tool, follow CONTRIBUTING.md. This registry owns only route-name to
+handler mapping; Gateway schema exposure and agent allow-lists are separate.
 
 Security: All handlers are invoked through IAM-authenticated Lambda. Each handler
 validates inputs (length limits, allowed values). The Lambda handler returns
@@ -32,7 +30,7 @@ from . import (
 )
 
 # Route name → handler function
-# Adding a tool = one line here + one file in tools/ + one path in tool_schema.json
+# Tool route name -> callable. Gateway schema names map to these keys in the Lambda router.
 ROUTES: dict[str, Callable[..., dict]] = {
     "hackernews": hackernews.handle,
     "youtube": youtube.handle,

@@ -164,7 +164,7 @@ def handle(params: dict) -> dict:
             if resp.status_code != 200:
                 continue
             data = resp.json().get("data", {}).get("children", [])
-        except (httpx.HTTPError, ValueError):
+        except httpx.HTTPError, ValueError:
             continue
 
         for child in data:

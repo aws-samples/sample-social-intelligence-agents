@@ -6,6 +6,23 @@ import httpx
 import pytest
 
 
+def _score_breakdown_for(score: int) -> dict[str, int]:
+    """Build a valid medium-ICP score breakdown for one bounded total."""
+    remaining = score
+    values: dict[str, int] = {"icp_adjustment": 0}
+    for name, cap in (
+        ("topical_alignment", 25),
+        ("timing_relevance", 20),
+        ("engagement_potential", 20),
+        ("intent_signal_strength", 20),
+        ("data_quality", 15),
+    ):
+        contribution = min(cap, max(0, remaining))
+        values[name] = contribution
+        remaining -= contribution
+    return values
+
+
 class TestRedditTool:
     """Tests for the Reddit search tool."""
 
@@ -226,7 +243,7 @@ class TestHackerNewsTool:
 class TestYouTubeTool:
     """Tests for the YouTube search tool."""
 
-    @patch("social_intelligence.tools.youtube.get_secret", return_value="fake-key")
+    @patch("social_intelligence.tools.youtube.get_secret", return_value="AIza" + "a" * 35)
     @patch("social_intelligence.tools.youtube.get_with_retry")
     def test_returns_videos(self, mock_get, _mock_secret):
         from social_intelligence.tools.youtube import handle
@@ -253,7 +270,7 @@ class TestYouTubeTool:
         assert len(result["videos"]) == 1
         assert result["videos"][0]["title"] == "AI Agent Tutorial"
 
-    @patch("social_intelligence.tools.youtube.get_secret", return_value="fake-key")
+    @patch("social_intelligence.tools.youtube.get_secret", return_value="AIza" + "a" * 35)
     @patch("social_intelligence.tools.youtube.get_with_retry")
     def test_returns_error_on_api_failure(self, mock_get, _mock_secret):
         from social_intelligence.tools.youtube import handle
@@ -262,6 +279,16 @@ class TestYouTubeTool:
         result = handle({"query": "test"})
         assert result["videos"] == []
         assert "error" in result
+
+    @patch("social_intelligence.tools.youtube.get_secret", return_value="generated/bootstrap?value")
+    @patch("social_intelligence.tools.youtube.get_with_retry")
+    def test_invalid_bootstrap_key_skips_network_call(self, mock_get, _mock_secret):
+        from social_intelligence.tools.youtube import handle
+
+        result = handle({"query": "AI agents"})
+
+        assert result["error"] == "not_configured"
+        mock_get.assert_not_called()
 
 
 class TestDevToTool:
@@ -330,12 +357,30 @@ class TestWikipediaTool:
         from social_intelligence.tools.wikipedia import handle
 
         mock_resp = MagicMock()
-        mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError("404", request=MagicMock(), response=MagicMock())
+        mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError("500", request=MagicMock(), response=MagicMock())
         mock_get.return_value = mock_resp
 
         result = handle({"topic": "nonexistent"})
         assert "error" in result
         assert result["source"] == "Wikipedia"
+
+    @patch("social_intelligence.tools.wikipedia.get_with_retry")
+    def test_not_found_returns_empty_result_without_error(self, mock_get):
+        from social_intelligence.tools.wikipedia import handle
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "404",
+            request=httpx.Request("GET", "https://en.wikipedia.org/wiki/missing"),
+            response=httpx.Response(404),
+        )
+        mock_get.return_value = mock_resp
+
+        result = handle({"topic": "missing"})
+
+        assert result["source"] == "Wikipedia"
+        assert result["extract"] == ""
+        assert "error" not in result
 
 
 class TestGitHubTool:
@@ -506,12 +551,73 @@ class TestPydanticModels:
         assert item.intent_signals == []
         assert item.timestamp == ""
 
+    def test_prospect_contract_retains_evidence_across_stages(self):
+        from social_intelligence.schemas.models import (
+            EnrichmentData,
+            EvidenceItem,
+            ProspectEnrichment,
+            ProspectProfile,
+            ScoredProspect,
+            TrendData,
+            TrendItem,
+        )
+
+        signal = TrendItem(
+            source="hackernews",
+            topic="Launch",
+            url="https://news.ycombinator.com/item?id=1",
+            fact="The launch reached 2400 points.",
+            metric_name="points",
+            metric_value="2400",
+        )
+        trend = TrendData(
+            prospects=[
+                ProspectProfile(
+                    prospect_id="hn:1",
+                    product_name="Acme",
+                    source_url=signal.url,
+                    trend_signals=[signal],
+                )
+            ]
+        )
+        enrichment = EnrichmentData(
+            prospects=[
+                ProspectEnrichment(
+                    prospect_id="hn:1",
+                    product_name="Acme",
+                    evidence=[
+                        EvidenceItem(
+                            source="github",
+                            url="https://github.com/acme/project",
+                            fact="The repository has 1200 stars.",
+                            metric_name="stars",
+                            metric_value="1200",
+                        )
+                    ],
+                )
+            ]
+        )
+        scored = ScoredProspect(
+            prospect_id="hn:1",
+            product_name="Acme",
+            source_url=trend.prospects[0].source_url,
+            score=85,
+            score_breakdown=_score_breakdown_for(85),
+            confidence=0.9,
+            reasoning="Strong, corroborated launch and open-source signals.",
+            evidence=enrichment.prospects[0].evidence,
+        )
+
+        assert scored.evidence[0].metric_value == "1200"
+        assert scored.source_url == "https://news.ycombinator.com/item?id=1"
+
     def test_scored_prospect_validation(self):
         from social_intelligence.schemas.models import ScoredProspect
 
         prospect = ScoredProspect(
             prospect_id="hn-123",
             score=85,
+            score_breakdown=_score_breakdown_for(85),
             confidence=0.9,
             reasoning="Strong multi-signal confirmation",
         )
@@ -526,6 +632,73 @@ class TestPydanticModels:
 
         with pytest.raises(ValidationError):
             ScoredProspect(prospect_id="test", score=150, confidence=0.5, reasoning="Invalid")
+
+    def test_scored_prospect_rejects_mismatched_score_breakdown(self):
+        """The model cannot persist a score total that disagrees with its components."""
+        from pydantic import ValidationError
+
+        from social_intelligence.schemas.models import ScoredProspect
+
+        with pytest.raises(ValidationError, match="score_breakdown total"):
+            ScoredProspect(
+                prospect_id="test",
+                score=84,
+                score_breakdown=_score_breakdown_for(85),
+                confidence=0.5,
+                reasoning="A deliberately inconsistent total.",
+            )
+
+    def test_scored_prospect_enforces_compact_structured_output(self):
+        from pydantic import ValidationError
+
+        from social_intelligence.schemas.models import EvidenceItem, ScoredProspect
+
+        with pytest.raises(ValidationError):
+            ScoredProspect(prospect_id="test", score=50, confidence=0.5, reasoning="x" * 481)
+        with pytest.raises(ValidationError):
+            ScoredProspect(
+                prospect_id="test",
+                score=50,
+                score_breakdown=_score_breakdown_for(50),
+                confidence=0.5,
+                reasoning="Valid concise rationale.",
+                evidence=[EvidenceItem(source="hackernews")] * 5,
+            )
+
+    def test_scoring_enum_fields_reject_unknown_values(self):
+        from pydantic import ValidationError
+
+        from social_intelligence.schemas.models import ProspectProfile, ScoredProspect
+
+        with pytest.raises(ValidationError):
+            ProspectProfile(prospect_id="hn-1", product_name="Acme", signal_strength="very strong")
+        with pytest.raises(ValidationError):
+            ScoredProspect(
+                prospect_id="hn-1",
+                score=75,
+                score_breakdown=_score_breakdown_for(75),
+                confidence=0.8,
+                reasoning="Valid evidence, invalid metadata.",
+                icp_fit="excellent",
+            )
+        with pytest.raises(ValidationError):
+            ScoredProspect(
+                prospect_id="hn-1",
+                score=75,
+                score_breakdown=_score_breakdown_for(75),
+                confidence=0.8,
+                reasoning="Valid evidence, invalid metadata.",
+                data_quality="verified",
+            )
+        with pytest.raises(ValidationError):
+            ScoredProspect(
+                prospect_id="hn-1",
+                score=75,
+                score_breakdown=_score_breakdown_for(75),
+                confidence=0.8,
+                reasoning="Valid evidence, invalid metadata.",
+                signal_strength="high",
+            )
 
     def test_email_draft_defaults(self):
         from social_intelligence.schemas.models import EmailDraft

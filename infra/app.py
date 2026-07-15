@@ -15,8 +15,12 @@ SocialIntelligenceStack(
     app,
     "SocialIntelligenceStack",
     env=cdk.Environment(
-        region=os.environ.get("CDK_DEFAULT_REGION", "us-east-1"),
-        account=os.environ["CDK_DEFAULT_ACCOUNT"],
+        region=(
+            os.environ.get("AWS_REGION")
+            or os.environ.get("AWS_DEFAULT_REGION")
+            or os.environ.get("CDK_DEFAULT_REGION", "us-east-1")
+        ),
+        account=os.environ.get("CDK_DEFAULT_ACCOUNT"),
     ),
 )
 app.synth()

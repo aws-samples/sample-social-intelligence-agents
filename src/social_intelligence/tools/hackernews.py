@@ -36,7 +36,7 @@ def _fetch_item(sid: int) -> dict | None:
         if not item or item.get("type") != "story":
             return None
         return item
-    except (httpx.HTTPError, ValueError, KeyError):
+    except httpx.HTTPError, ValueError, KeyError:
         logger.debug("Failed to fetch HN item %d", sid)
         return None
 

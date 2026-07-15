@@ -19,7 +19,7 @@ except ImportError:
 # AWS / App settings
 # ---------------------------------------------------------------------------
 
-AWS_REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+AWS_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
 AWS_PROFILE = os.environ.get("AWS_PROFILE", "default")
 LEADS_TABLE = os.environ.get("LEADS_TABLE_NAME", "social-intel-leads")
 AGENT_ARN = os.environ.get("AGENTCORE_AGENT_ARN", "")

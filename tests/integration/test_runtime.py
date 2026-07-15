@@ -14,7 +14,7 @@ import uuid
 
 import pytest
 
-REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
 PROFILE = os.environ.get("AWS_PROFILE", "default")
 AGENT_ARN = os.environ.get("AGENTCORE_AGENT_ARN", "")
 
@@ -66,7 +66,7 @@ def test_invoke_graph_pattern(agentcore_client):
             raw = line[6:] if line.startswith("data: ") else line
             try:
                 parsed = json.loads(raw)
-            except (json.JSONDecodeError, TypeError):
+            except json.JSONDecodeError, TypeError:
                 continue
             if not isinstance(parsed, dict):
                 continue

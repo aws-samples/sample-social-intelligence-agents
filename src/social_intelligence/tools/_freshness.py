@@ -41,7 +41,7 @@ def freshness_weight(epoch_or_iso: int | float | str | None) -> float:
             ts = datetime.fromisoformat(raw.replace("Z", "+00:00"))
             if ts.tzinfo is None:
                 ts = ts.replace(tzinfo=timezone.utc)
-    except (ValueError, OSError, OverflowError):
+    except ValueError, OSError, OverflowError:
         logger.debug("freshness_weight: could not parse %r, returning 1.0", epoch_or_iso)
         return 1.0
 

@@ -9,7 +9,8 @@ are tested in both their default (off) and active states.
 import json
 import os
 import time
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -141,6 +142,47 @@ class TestGroundingGate:
         out = json.loads(verify_email_claims.__wrapped__("Great work on the launch.", "{}"))
         assert out["grounding_score"] == 1.0
 
+    def test_numeric_claim_matches_structured_json_evidence(self):
+        """Value-level grounding: an email metric matches a numeric JSON field.
+
+        Regression guard for the literal-substring bug where "1200 stars" in the
+        email failed to match {"github_stars": 1200} in structured tool output.
+        """
+        from social_intelligence.tools.grounding_gate import verify_email_claims
+
+        evidence = json.dumps({"github_stars": 1200, "repo": "example-tool"})
+        out = json.loads(verify_email_claims.__wrapped__("Noticed your repo hit 1200 stars!", evidence))
+        assert out["grounding_score"] == 1.0
+        assert out["unsupported_claims"] == []
+
+    def test_scale_suffix_claim_matches_expanded_number(self):
+        """ "10K" in an email matches 10000 in evidence via scale normalization."""
+        from social_intelligence.tools.grounding_gate import verify_email_claims
+
+        evidence = json.dumps({"downloads": 10000})
+        out = json.loads(verify_email_claims.__wrapped__("You crossed 10K downloads.", evidence))
+        assert out["grounding_score"] == 1.0
+
+
+class TestEmailQualification:
+    """Evidence corroboration must accept only real supported-source domains."""
+
+    def test_rejects_lookalike_source_domains(self):
+        from social_intelligence.orchestration.qualification_gate import assess_email_eligibility
+
+        qualification = assess_email_eligibility(
+            80,
+            [
+                {"url": "https://evilgithub.com/acme/project"},
+                {"url": "https://news.ycombinator.com/item?id=1"},
+            ],
+            score_threshold=60,
+            min_independent_sources=2,
+        )
+
+        assert qualification.independent_sources == ("hackernews",)
+        assert qualification.email_eligible is False
+
 
 class TestStoreLeadGroundingThreshold:
     """store_lead must refuse low-grounding leads when GROUNDING_MIN_SCORE is set."""
@@ -148,14 +190,174 @@ class TestStoreLeadGroundingThreshold:
     def test_rejects_below_threshold_without_writing(self):
         from social_intelligence.tools import dynamodb_tool
 
+        evidence = json.dumps(
+            [
+                {"source": "github", "fact": "Repository is active"},
+                {"source": "hackernews", "fact": "Recent launch"},
+            ]
+        )
         with patch.dict(os.environ, {"GROUNDING_MIN_SCORE": "0.8"}, clear=False):
             with patch.object(dynamodb_tool, "_get_table") as mock_table:
                 result = json.loads(
-                    dynamodb_tool.store_lead.__wrapped__(prospect_id="hn-1", product_name="Acme", grounding_score=0.4)
+                    dynamodb_tool.store_lead.__wrapped__(
+                        prospect_id="hn-1",
+                        product_name="Acme",
+                        score=80,
+                        email_body="Your product has 99% uptime.",
+                        evidence_json=evidence,
+                    )
                 )
                 mock_table.assert_not_called()
         assert result["stored"] is False
         assert "grounding" in result["reason"].lower()
+
+    def test_recomputes_grounding_and_persists_source_evidence(self):
+        """Persistence verifies the exact draft instead of accepting a caller score."""
+        from social_intelligence.tools import dynamodb_tool
+
+        mock_table = MagicMock()
+        mock_table.query.return_value = {"Items": []}
+        evidence = json.dumps(
+            [
+                {"source": "github", "github_stars": 1200},
+                {"source": "hackernews", "fact": "Recent product launch"},
+            ]
+        )
+        with patch.object(dynamodb_tool, "_get_table", return_value=mock_table):
+            with patch.object(dynamodb_tool, "_find_by_product_name", return_value=None):
+                result = json.loads(
+                    dynamodb_tool.store_lead.__wrapped__(
+                        prospect_id="hn-verified",
+                        product_name="Verified",
+                        score=80,
+                        email_body=(
+                            "Verified reached 1200 stars after its Hacker News launch. "
+                            "AnyCompany can prioritize the HN comments for developer-relations follow-up."
+                        ),
+                        evidence_json=evidence,
+                    )
+                )
+
+        assert result["stored"] is True
+        writes = mock_table.meta.client.transact_write_items.call_args.kwargs["TransactItems"]
+        item = writes[-1]["Put"]["Item"]
+        assert item["grounding_score"] == 1
+        assert item["independent_source_count"] == 2
+        assert json.loads(item["evidence_json"]) == json.loads(evidence)
+
+    def test_uses_public_strands_tool_interface_for_reverification(self):
+        """The persistence boundary calls the documented callable tool interface."""
+        from social_intelligence.tools import dynamodb_tool
+
+        mock_table = MagicMock()
+        mock_table.query.return_value = {"Items": []}
+
+        def fake_verifier(email_body: str, evidence_json: str) -> str:
+            assert (
+                email_body == "PublicTool reached 1200 stars after its Hacker News launch. "
+                "AnyCompany can prioritize the HN comments for developer-relations follow-up."
+            )
+            assert json.loads(evidence_json) == [
+                {"source": "github", "github_stars": 1200},
+                {"source": "hackernews", "fact": "Recent product launch"},
+            ]
+            return json.dumps(
+                {
+                    "grounding_score": 1.0,
+                    "must_revise": False,
+                    "unsupported_claims": [],
+                }
+            )
+
+        with patch.object(dynamodb_tool, "_get_table", return_value=mock_table):
+            with patch.object(dynamodb_tool, "_find_by_product_name", return_value=None):
+                with patch.object(dynamodb_tool, "verify_email_claims", fake_verifier):
+                    result = json.loads(
+                        dynamodb_tool.store_lead.__wrapped__(
+                            prospect_id="hn-public-tool",
+                            product_name="PublicTool",
+                            score=80,
+                            email_body=(
+                                "PublicTool reached 1200 stars after its Hacker News launch. "
+                                "AnyCompany can prioritize the HN comments for developer-relations follow-up."
+                            ),
+                            evidence_json=json.dumps(
+                                [
+                                    {"source": "github", "github_stars": 1200},
+                                    {"source": "hackernews", "fact": "Recent product launch"},
+                                ]
+                            ),
+                        )
+                    )
+
+        assert result["stored"] is True
+
+    def test_rejects_email_below_score_threshold_without_writing(self):
+        from social_intelligence.tools import dynamodb_tool
+
+        evidence = json.dumps(
+            [
+                {"source": "github", "fact": "Active repository"},
+                {"source": "hackernews", "fact": "Recent launch"},
+            ]
+        )
+        with patch.object(dynamodb_tool, "_get_table") as mock_table:
+            result = json.loads(
+                dynamodb_tool.store_lead.__wrapped__(
+                    prospect_id="hn-low-score",
+                    product_name="Low Score",
+                    score=59,
+                    email_body="I noticed your recent launch.",
+                    evidence_json=evidence,
+                )
+            )
+
+        assert result["stored"] is False
+        assert "score" in result["reason"]
+        mock_table.assert_not_called()
+
+    def test_rejects_email_without_two_independent_sources_without_writing(self):
+        from social_intelligence.tools import dynamodb_tool
+
+        evidence = json.dumps(
+            [
+                {"source": "github", "fact": "Active repository"},
+                {"source": "github", "fact": "Recent commit"},
+            ]
+        )
+        with patch.object(dynamodb_tool, "_get_table") as mock_table:
+            result = json.loads(
+                dynamodb_tool.store_lead.__wrapped__(
+                    prospect_id="hn-single-source",
+                    product_name="Single Source",
+                    score=80,
+                    email_body="I noticed your repository activity.",
+                    evidence_json=evidence,
+                )
+            )
+
+        assert result["stored"] is False
+        assert "independent sources" in result["reason"]
+        assert result["independent_source_count"] == 1
+        mock_table.assert_not_called()
+
+    def test_rejects_non_standard_json_evidence_without_writing(self):
+        """NaN is accepted by Python's parser but is not valid interoperable JSON."""
+        from social_intelligence.tools import dynamodb_tool
+
+        with patch.object(dynamodb_tool, "_get_table") as mock_table:
+            result = json.loads(
+                dynamodb_tool.store_lead.__wrapped__(
+                    prospect_id="hn-bad-evidence",
+                    product_name="BadEvidence",
+                    email_body="Your project reached 1200 stars.",
+                    evidence_json='{"github_stars": NaN}',
+                )
+            )
+
+        assert result["stored"] is False
+        assert "valid JSON" in result["reason"]
+        mock_table.assert_not_called()
 
 
 class TestStoreLeadApprovalGate:
@@ -166,12 +368,16 @@ class TestStoreLeadApprovalGate:
 
         captured: dict = {}
 
+        class _FakeClient:
+            def transact_write_items(self, *, TransactItems):
+                captured["item"] = TransactItems[-1]["Put"]["Item"]
+
         class _FakeTable:
+            name = "test-leads"
+            meta = SimpleNamespace(client=_FakeClient())
+
             def query(self, **_):
                 return {"Items": []}
-
-            def put_item(self, *, Item, **_):
-                captured["item"] = Item
 
         dynamodb_tool.reset_lead_counter()
         with patch.dict(os.environ, env, clear=False):
