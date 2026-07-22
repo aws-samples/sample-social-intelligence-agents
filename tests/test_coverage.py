@@ -398,7 +398,7 @@ class TestStoreLeadDedupAndCap:
         assert len(set(keys)) == 2
 
     def test_persist_scored_prospects_requires_and_persists_score_breakdown(self):
-        """Swarm score persistence validates the same arithmetic as Graph output."""
+        """Swarm score persistence stores the breakdown that recomputes the score."""
         from social_intelligence.tools import dynamodb_tool
 
         mock_table = MagicMock()
@@ -432,6 +432,64 @@ class TestStoreLeadDedupAndCap:
 
         assert result["stored"] is False
         assert "score persistence contract" in result["reason"]
+        # A hard failure names the exact field paths so the analyst can repair the row
+        # instead of retrying the whole batch blindly.
+        assert any("prospect_id" in err for err in result["errors"])
+        assert any("score_breakdown" in err for err in result["errors"])
+
+    def test_persist_scored_prospects_canonicalizes_drifted_score(self):
+        """A one-point arithmetic slip is corrected from the breakdown, not rejected."""
+        from social_intelligence.tools import dynamodb_tool
+
+        mock_table = MagicMock()
+        dynamodb_tool.set_run_session_id("canonical-drift-run")
+        try:
+            with patch.object(dynamodb_tool, "_get_table", return_value=mock_table):
+                result = json.loads(
+                    dynamodb_tool.persist_scored_prospects.__wrapped__(
+                        [
+                            {
+                                "prospect_id": "drifted",
+                                "score": 84,  # breakdown sums to 83 — off by one
+                                "icp_fit": "medium",
+                                "score_breakdown": _score_breakdown_for(83),
+                            }
+                        ]
+                    )
+                )
+        finally:
+            dynamodb_tool.set_run_session_id("")
+
+        assert result == {"stored": True, "persisted": 1}
+        assert mock_table.put_item.call_args.kwargs["Item"]["score"] == 83
+
+    def test_persist_scored_prospects_canonicalizes_icp_adjustment(self):
+        """icp_fit drives the adjustment: a 'strong' fit yields +10 over the base total."""
+        from social_intelligence.tools import dynamodb_tool
+
+        mock_table = MagicMock()
+        dynamodb_tool.set_run_session_id("canonical-icp-run")
+        try:
+            with patch.object(dynamodb_tool, "_get_table", return_value=mock_table):
+                result = json.loads(
+                    dynamodb_tool.persist_scored_prospects.__wrapped__(
+                        [
+                            {
+                                "prospect_id": "strong-fit",
+                                "score": 83,  # analyst omitted the +10 strong-ICP adjustment
+                                "icp_fit": "strong",
+                                "score_breakdown": _score_breakdown_for(83),  # icp_adjustment=0
+                            }
+                        ]
+                    )
+                )
+        finally:
+            dynamodb_tool.set_run_session_id("")
+
+        assert result == {"stored": True, "persisted": 1}
+        item = mock_table.put_item.call_args.kwargs["Item"]
+        assert item["score"] == 93
+        assert item["score_breakdown"]["icp_adjustment"] == 10
 
     def test_persist_scored_prospects_accepts_an_empty_completed_analysis(self):
         """A valid no-prospect analysis is distinct from a missing Swarm handoff."""
