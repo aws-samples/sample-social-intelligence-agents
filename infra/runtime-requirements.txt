@@ -44,7 +44,7 @@ jsonschema-specifications==2025.9.1
 keyring==25.7.0
 markdown-it-py==4.2.0
 markupsafe==3.0.3
-mcp==1.28.0
+mcp==1.28.1
 mcp-proxy-for-aws==1.6.2
 mdurl==0.1.2
 more-itertools==11.1.0
