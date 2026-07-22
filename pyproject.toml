@@ -10,13 +10,13 @@ readme = "README.md"
 license = "MIT-0"
 requires-python = ">=3.14,<3.15"
 dependencies = [
-    "strands-agents==1.47.0",
-    "bedrock-agentcore[strands-agents]==1.18.0",
+    "strands-agents==1.48.0",
+    "bedrock-agentcore[strands-agents]==1.18.1",
     "boto3>=1.43.31",
     "pydantic==2.13.4",
     "httpx==0.28.1",
     "jinja2==3.1.6",
-    "mcp-proxy-for-aws==1.6.2",
+    "mcp-proxy-for-aws==1.6.4",
 ]
 
 [project.optional-dependencies]
