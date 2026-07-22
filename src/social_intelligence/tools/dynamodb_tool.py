@@ -850,6 +850,25 @@ def persist_analysis_scores(prospects: list[dict]) -> int:
     return written
 
 
+def _summarize_validation_errors(exc: ValidationError, *, limit: int = 5) -> list[str]:
+    """Render Pydantic validation errors as compact, agent-actionable field paths.
+
+    Args:
+        exc: The raised validation error for the score-persistence payload.
+        limit: Maximum number of error strings to return, to keep the tool result small.
+
+    Returns:
+        Up to ``limit`` strings of the form ``"prospects.0.prospect_id: <message>"``.
+    """
+    summaries: list[str] = []
+    for error in exc.errors():
+        location = ".".join(str(part) for part in error["loc"])
+        summaries.append(f"{location}: {error['msg']}")
+        if len(summaries) >= limit:
+            break
+    return summaries
+
+
 _PERSIST_SCORED_PROSPECTS_INPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -895,11 +914,24 @@ def persist_scored_prospects(prospects: list[dict[str, object]]) -> str:
     """
     try:
         score_request = ScorePersistenceRequest.model_validate({"prospects": prospects})
-    except TypeError, ValueError, ValidationError:
+    except ValidationError as exc:
+        # Score arithmetic is now canonicalized, so a failure here means a structurally
+        # unusable row (e.g. missing prospect_id/score_breakdown or an out-of-range
+        # category). Surface the specific field paths so the analyst can repair the exact
+        # prospect instead of retrying the whole batch blindly.
         return json.dumps(
             {
                 "stored": False,
                 "reason": "prospects must match the score persistence contract",
+                "errors": _summarize_validation_errors(exc),
+                "persisted": 0,
+            }
+        )
+    except TypeError, ValueError:
+        return json.dumps(
+            {
+                "stored": False,
+                "reason": "prospects must be a native array of score objects",
                 "persisted": 0,
             }
         )

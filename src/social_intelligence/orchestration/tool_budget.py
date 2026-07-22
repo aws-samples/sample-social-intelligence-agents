@@ -176,15 +176,17 @@ def search_specialist_tool_budget() -> ToolCallBudget:
 def analysis_tool_budget() -> ToolCallBudget:
     """Return the score-persistence budget for the swarm analysis handoff.
 
-    Allow one schema self-correction: the analyst reliably issues a first
-    persist_scored_prospects call, and if the payload fails the ScoreBreakdown or
-    icp_adjustment contract it corrects and resubmits once. A hard cap of one call
-    silently drops every swarm score row when that correction is needed.
+    Score persistence now canonicalizes the top-line score and icp_adjustment from the
+    bounded score_breakdown, so ordinary arithmetic drift no longer rejects the batch and
+    the common case succeeds on the first call. The budget still allows two
+    self-corrections: a genuinely malformed row (e.g. a missing field or an out-of-range
+    category) returns field-level ``errors`` the analyst can repair on retry, and this
+    headroom keeps such a repair from tripping the swarm-to-graph recovery fallback.
     """
     return ToolCallBudget(
         agent_name="analyst",
-        max_total_calls=2,
-        max_calls_per_tool={"persist_scored_prospects": 2},
+        max_total_calls=3,
+        max_calls_per_tool={"persist_scored_prospects": 3},
         default_per_tool_limit=0,
     )
 

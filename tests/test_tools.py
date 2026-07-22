@@ -648,6 +648,31 @@ class TestPydanticModels:
                 reasoning="A deliberately inconsistent total.",
             )
 
+    def test_persisted_score_canonicalizes_instead_of_rejecting(self):
+        """The swarm persistence contract recomputes the score from the breakdown.
+
+        Unlike the Graph ScoredProspect path, the Swarm analyst has no structured-output
+        retry, so a drifted total or a mismatched icp_adjustment is normalized from the
+        bounded components rather than rejected.
+        """
+        from social_intelligence.schemas.models import PersistedScore
+
+        drifted = PersistedScore(
+            prospect_id="hn-123",
+            score=84,  # breakdown sums to 83
+            score_breakdown=_score_breakdown_for(83),
+        )
+        assert drifted.score == 83
+
+        strong = PersistedScore(
+            prospect_id="hn-123",
+            score=83,  # analyst omitted the strong-ICP +10
+            icp_fit="strong",
+            score_breakdown=_score_breakdown_for(83),
+        )
+        assert strong.score == 93
+        assert strong.score_breakdown.icp_adjustment == 10
+
     def test_scored_prospect_enforces_compact_structured_output(self):
         from pydantic import ValidationError
 
