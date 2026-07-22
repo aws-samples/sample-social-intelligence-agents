@@ -271,18 +271,17 @@ wheels = [
 
 [[package]]
 name = "cdk-nag"
-version = "2.38.2"
+version = "3.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aws-cdk-lib" },
     { name = "constructs" },
     { name = "jsii" },
     { name = "publication" },
-    { name = "typeguard" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/37/c1/2caccd33f659d95c0a48a13c838ae885aa3a4ee6ed768d40848cc7eb4202/cdk_nag-2.38.2.tar.gz", hash = "sha256:a4d419062ea4d64c2892942214b9184b124eb2bc36d087982007b3455e1ac443", size = 777714, upload-time = "2026-04-27T17:33:08.813Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/87/8d/7c98ad8a867925ba1ac7693dd4f74525def8459abb5a4fcef7731496f5be/cdk_nag-3.0.1.tar.gz", hash = "sha256:82db3c3383bbc6ab5e68f55cad688a04b02c9f37cc9e8de566d93b080a2efa87", size = 734645, upload-time = "2026-06-15T07:52:13.636Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f2/f5/ff45ffcf45d421a668c6a0a994d5e0491167d8ca432108a339e272e012e4/cdk_nag-2.38.2-py3-none-any.whl", hash = "sha256:d37f18ae9450f401bcc55d5d82138beee561486806579849cb9be25ff7565904", size = 771251, upload-time = "2026-04-27T17:33:05.04Z" },
+    { url = "https://files.pythonhosted.org/packages/1d/bc/6e4116dad5ae0d2157c39373adcbdd86313822e499da499afefe43b892a5/cdk_nag-3.0.1-py3-none-any.whl", hash = "sha256:b32b77e6ad29501231ed3a99f36f29670e85a587617fc05b554ff2f305243186", size = 732361, upload-time = "2026-06-15T07:52:10.861Z" },
 ]
 
 [[package]]
@@ -1720,7 +1719,7 @@ requires-dist = [
     { name = "aws-cdk-lib", marker = "extra == 'infra'", specifier = "==2.261.0" },
     { name = "bedrock-agentcore", extras = ["strands-agents"], specifier = "==1.18.0" },
     { name = "boto3", specifier = ">=1.43.31" },
-    { name = "cdk-nag", marker = "extra == 'infra'", specifier = "==2.38.2" },
+    { name = "cdk-nag", marker = "extra == 'infra'", specifier = "==3.0.1" },
     { name = "constructs", marker = "extra == 'infra'", specifier = "==10.6.0" },
     { name = "httpx", specifier = "==0.28.1" },
     { name = "jinja2", specifier = "==3.1.6" },
