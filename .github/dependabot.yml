@@ -1,0 +1,69 @@
+# Dependabot configuration.
+#
+# Design notes for this repo:
+#   * The uv ecosystem at "/" is the single source of truth for Python deps
+#     (pyproject.toml + uv.lock). Updates here drive everything at runtime.
+#   * infra/runtime-requirements.txt is a DERIVED artifact — it is exported from
+#     uv.lock by CI (`uv export ... --output-file infra/runtime-requirements.txt`)
+#     and guarded by a diff gate. It is intentionally NOT managed as its own
+#     ecosystem: a direct edit would desync it from uv.lock and fail CI (this is
+#     why the earlier standalone mcp PRs failed). When a Dependabot PR here bumps
+#     a runtime dependency, regenerate the export with that command and push it to
+#     the PR branch so the diff gate passes. Security *alerts* still cover the file
+#     via uv.lock regardless of this config.
+#   * Updates are grouped to keep PR volume low and CI-coherent: one PR per
+#     ecosystem for minor+patch bumps, with majors surfaced individually so their
+#     breaking-change review is not hidden inside a group.
+version: 2
+updates:
+  # Python dependencies — source of truth (pyproject.toml + uv.lock).
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+    groups:
+      python-minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+      python-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  # Lambda bundle has its own pinned requirements (infra/lambda/requirements.txt).
+  - package-ecosystem: "pip"
+    directory: "/infra/lambda"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    groups:
+      lambda-minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+      lambda-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  # Keep CI's pinned GitHub Actions current (they are SHA-pinned in ci.yml).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    groups:
+      actions:
+        patterns:
+          - "*"
