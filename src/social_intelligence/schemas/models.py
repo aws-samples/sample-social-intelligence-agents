@@ -129,14 +129,41 @@ class ScoreBreakdown(BaseModel):
         return min(100, max(0, base_score + self.icp_adjustment))
 
 
+# The ICP-fit label deterministically fixes the adjustment applied after category totals.
+_ICP_ADJUSTMENTS: dict[str, Literal[-10, 0, 10]] = {"strong": 10, "medium": 0, "weak": -10}
+
+
 def _validate_score_calculation(score: int, icp_fit: str, score_breakdown: ScoreBreakdown) -> None:
     """Reject a score whose components or ICP adjustment do not match its total."""
-    expected_adjustments = {"strong": 10, "medium": 0, "weak": -10}
-    if score_breakdown.icp_adjustment != expected_adjustments[icp_fit]:
-        raise ValueError(f"icp_adjustment must be {expected_adjustments[icp_fit]} for icp_fit={icp_fit!r}")
+    expected_adjustment = _ICP_ADJUSTMENTS[icp_fit]
+    if score_breakdown.icp_adjustment != expected_adjustment:
+        raise ValueError(f"icp_adjustment must be {expected_adjustment} for icp_fit={icp_fit!r}")
     expected_score = score_breakdown.total_score()
     if score != expected_score:
         raise ValueError(f"score must equal the capped score_breakdown total ({expected_score})")
+
+
+def _canonical_score(icp_fit: str, score_breakdown: ScoreBreakdown) -> tuple[int, ScoreBreakdown]:
+    """Derive the authoritative score and ICP adjustment from bounded contributions.
+
+    The ``score_breakdown`` categories are the source of truth: each is independently
+    range-validated, so the auditable 0-100 total is a pure function of them plus the
+    ICP-fit label. Rather than rejecting a caller whose top-line ``score`` or
+    ``icp_adjustment`` drifts from that total — an easy arithmetic slip for an LLM that
+    would otherwise drop the entire batch — we recompute both from the breakdown. The
+    persisted score therefore always recomputes from its components, preserving the
+    auditable-scoring contract without brittle rejection.
+
+    Args:
+        icp_fit: The ICP-fit label that fixes the post-total adjustment.
+        score_breakdown: Bounded per-category contributions.
+
+    Returns:
+        The canonical (score, score_breakdown) with ``icp_adjustment`` normalized to the
+        value implied by ``icp_fit``.
+    """
+    normalized = score_breakdown.model_copy(update={"icp_adjustment": _ICP_ADJUSTMENTS[icp_fit]})
+    return normalized.total_score(), normalized
 
 
 class ScoredProspect(BaseModel):
@@ -226,9 +253,19 @@ class PersistedScore(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_score_calculation(self) -> "PersistedScore":
-        """Reject unverified score arithmetic from the Swarm handoff."""
-        _validate_score_calculation(self.score, self.icp_fit, self.score_breakdown)
+    def canonicalize_score(self) -> "PersistedScore":
+        """Recompute the persisted score from its bounded components.
+
+        Unlike the Graph structured-output path — which can transparently retry on a
+        mismatch — the Swarm analyst persists through a plain tool call with no
+        structured-output retry. A one-point arithmetic slip or an ``icp_adjustment``
+        that disagrees with ``icp_fit`` would otherwise reject the whole batch and force
+        blind self-correction until the tool budget is exhausted. The breakdown
+        categories are individually range-validated and are the source of truth, so we
+        derive the authoritative score and ICP adjustment from them. The stored score
+        still recomputes exactly from its components, keeping scoring auditable.
+        """
+        self.score, self.score_breakdown = _canonical_score(self.icp_fit, self.score_breakdown)
         return self
 
 
