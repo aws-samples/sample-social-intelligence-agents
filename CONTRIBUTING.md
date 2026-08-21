@@ -107,7 +107,11 @@ ROUTES = {
    (`_TREND_GATEWAY_TOOL_NAMES` or `_ENRICHMENT_GATEWAY_TOOL_NAMES`) so the
    intended agent can discover it through AgentCore Gateway.
 
-7. Add hermetic unit coverage for validation and error paths, then run
+7. Mirror the tool in `src/social_intelligence/schemas/openapi.yaml`. That spec is
+   reference documentation of the HTTP surface and is not loaded at build or run time,
+   so `tests/test_schemas.py` fails if it drifts from `tool_schema.json`.
+
+8. Add hermetic unit coverage for validation and error paths, then run
    `python -m pytest tests/ -q --ignore=tests/integration`.
 
 The Lambda handler, AgentCore Gateway, and API Gateway then pick up the new tool
