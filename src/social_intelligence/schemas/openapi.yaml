@@ -2,11 +2,16 @@ openapi: "3.0.3"
 info:
   title: Social Intelligence Tools API
   description: |
-    External API proxy for the social intelligence multi-agent system.
-    Each path maps to one tool that agents can invoke via Amazon Bedrock AgentCore Gateway.
-    This spec is the single source of truth for tool contracts: it drives
-    Amazon Bedrock AgentCore Gateway tool discovery, Amazon API Gateway request validation,
-    and documentation.
+    Reference documentation for the external API proxy of the social intelligence
+    multi-agent system. Each path maps to one tool that agents can invoke via
+    Amazon Bedrock AgentCore Gateway.
+
+    This spec is documentation only; nothing loads it at build or run time. The
+    contract that is actually wired is `tool_schema.json`, which
+    `infra/gateway_stack.py` passes to the gateway target via
+    `ToolSchema.from_local_asset`, and which therefore drives tool discovery.
+    When you add or change a tool, update `tool_schema.json` first and mirror it
+    here so this file stays an accurate description of the HTTP surface.
   version: "1.0.0"
   license:
     name: MIT No Attribution
