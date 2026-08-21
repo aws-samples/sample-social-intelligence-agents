@@ -24,7 +24,7 @@ Deploy once, then test both orchestration patterns through the same endpoint. Di
 - **Bedrock Guardrails**: the CDK stack creates a guardrail and injects its ID and version into the deployed runtime
 - **Frontier table**: agents can claim a prospect before processing it, reducing duplicate work across concurrent runs
 - **Optional grounding threshold**: set `GROUNDING_MIN_SCORE` to block persistence of a low-grounding draft (`src/social_intelligence/tools/grounding_gate.py`)
-- **Optional compliance footer**: set `COMPLIANCE_FOOTER_REQUIRED=true` to add an unsubscribe footer to rendered HTML email
+- **Optional compliance footer**: set `COMPLIANCE_FOOTER_REQUIRED=true` to add an unsubscribe footer to rendered HTML email, and `UNSUBSCRIBE_URL` to point that link somewhere real (it otherwise renders a placeholder)
 - **Optional human review**: set `EMAIL_APPROVAL_REQUIRED=true` to store leads as `pending_review`; delivery is outside this sample's scope
 - **Deterministic qualification**: an email draft must score at least 60 and cite at least two distinct supported sources; the Graph gate and `store_lead` both enforce this
 - **Auditable scoring**: bounded category contributions and the ICP adjustment must recompute to the persisted 0-100 score in both Graph and Swarm flows
@@ -164,7 +164,7 @@ cdk deploy
 cd ..
 ```
 
-The default model is `global.anthropic.claude-sonnet-4-6`. Confirm model access in the target Region before deployment. To pin a different available profile or tier models per agent, export `MODEL_ID` (or `TREND_MODEL_ID`, `SEARCH_MODEL_ID`, `ANALYSIS_MODEL_ID`, `EMAIL_MODEL_ID`) before `cdk deploy`; the stack forwards them to the runtime. The stack also supplies the ID and published version of its Bedrock Guardrail. Runtime settings such as `EMAIL_SCORE_THRESHOLD`, `MIN_INDEPENDENT_SOURCES`, `GROUNDING_MIN_SCORE`, `EMAIL_APPROVAL_REQUIRED`, `COMPLIANCE_FOOTER_REQUIRED`, `ORCHESTRATION_NODE_TIMEOUT_SECONDS`, and `LOG_LEVEL` are forwarded when set.
+The default model is `global.anthropic.claude-sonnet-4-6`. Confirm model access in the target Region before deployment. To pin a different available profile or tier models per agent, export `MODEL_ID` (or `TREND_MODEL_ID`, `SEARCH_MODEL_ID`, `ANALYSIS_MODEL_ID`, `EMAIL_MODEL_ID`) before `cdk deploy`; the stack forwards them to the runtime. The stack also supplies the ID and published version of its Bedrock Guardrail. Runtime settings such as `EMAIL_SCORE_THRESHOLD`, `MIN_INDEPENDENT_SOURCES`, `GROUNDING_MIN_SCORE`, `EMAIL_APPROVAL_REQUIRED`, `COMPLIANCE_FOOTER_REQUIRED`, `UNSUBSCRIBE_URL`, `ORCHESTRATION_NODE_TIMEOUT_SECONDS`, and `LOG_LEVEL` are forwarded when set. `SECRET_CACHE_TTL_SECONDS` is forwarded to the tools Lambda, which is where the cached secrets are read. Boolean settings accept `true`, `1`, or `yes`; any other value, including `false`, leaves the flag off.
 
 CDK deploys everything in a single stack: the Lambda, API Gateway, AgentCore Gateway (IAM auth + Lambda target), AgentCore Runtime, AgentCore Memory, DynamoDB tables, a Bedrock Guardrail, and four CMK-encrypted Secrets Manager secrets. No separate gateway setup script is needed.
 

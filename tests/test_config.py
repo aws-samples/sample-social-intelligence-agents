@@ -1,5 +1,6 @@
 """Tests for shared runtime configuration resolution."""
 
+import logging
 from unittest.mock import MagicMock
 
 from strands.models import BedrockModel
@@ -11,6 +12,7 @@ from social_intelligence.config import (
     SEARCH_MAX_TOKENS,
     TREND_MAX_TOKENS,
     bedrock_boto_config,
+    bool_env,
     resolve_aws_region,
 )
 
@@ -61,6 +63,30 @@ def test_guardrail_kwargs_generate_a_single_inline_converse_configuration(monkey
         "trace": "enabled",
         "streamProcessingMode": "sync",
     }
+
+
+def test_bool_env_treats_falsy_spellings_as_off(monkeypatch) -> None:
+    # bool("false") is True, so a flag read with bool() would turn on when an operator
+    # explicitly disables it. Every falsy spelling must stay off.
+    for value in ("false", "False", "0", "no", " FALSE ", ""):
+        monkeypatch.setenv("SOCIAL_INTEL_TEST_FLAG", value)
+        assert bool_env("SOCIAL_INTEL_TEST_FLAG") is False, value
+
+    monkeypatch.delenv("SOCIAL_INTEL_TEST_FLAG")
+    assert bool_env("SOCIAL_INTEL_TEST_FLAG") is False
+
+
+def test_bool_env_accepts_the_documented_truthy_spellings(monkeypatch) -> None:
+    for value in ("true", "TRUE", "1", "yes", " Yes "):
+        monkeypatch.setenv("SOCIAL_INTEL_TEST_FLAG", value)
+        assert bool_env("SOCIAL_INTEL_TEST_FLAG") is True, value
+
+
+def test_bool_env_warns_and_stays_off_for_unrecognized_values(monkeypatch, caplog) -> None:
+    monkeypatch.setenv("SOCIAL_INTEL_TEST_FLAG", "maybe")
+    with caplog.at_level(logging.WARNING, logger=config.__name__):
+        assert bool_env("SOCIAL_INTEL_TEST_FLAG") is False
+    assert "is not a boolean" in caplog.text
 
 
 def test_analysis_output_budget_has_a_safe_default() -> None:

@@ -1413,6 +1413,15 @@ class TestEmailRenderer:
         assert "Unsubscribe" in result["html"]
         assert "123 Main St" in result["html"]
 
+    def test_compliance_footer_absent_when_env_explicitly_disabled(self):
+        """A falsy value must disable the footer, not enable it (bool("false") is True)."""
+        from social_intelligence.tools.email_renderer import render_email_html
+
+        for disabled in ("false", "False", "0", "no", " false "):
+            with patch.dict(os.environ, {"COMPLIANCE_FOOTER_REQUIRED": disabled}):
+                result = json.loads(render_email_html(prospect_id="p-4", subject="Hi", body="Footer test."))
+            assert "Unsubscribe" not in result["html"], f"{disabled!r} should disable the footer"
+
     def test_prospect_id_and_subject_in_result(self):
         from social_intelligence.tools.email_renderer import render_email_html
 
