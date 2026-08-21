@@ -31,6 +31,30 @@ def _bounded_int_env(name: str, default: int, minimum: int, maximum: int) -> int
     return value
 
 
+# One shared vocabulary for boolean environment variables. Plain bool("false") is True,
+# so a flag parsed with bool() turns on for any non-empty value, including "false" and "0".
+_TRUE_VALUES = frozenset({"true", "1", "yes"})
+_FALSE_VALUES = frozenset({"false", "0", "no"})
+
+
+def bool_env(name: str) -> bool:
+    """Read a boolean environment variable, defaulting to off.
+
+    Args:
+        name: Environment variable to read.
+
+    Returns:
+        True when the value is "true", "1", or "yes", ignoring case and surrounding
+        whitespace; False when the variable is unset, empty, or unrecognized.
+    """
+    raw = os.environ.get(name, "").strip().lower()
+    if raw in _TRUE_VALUES:
+        return True
+    if raw and raw not in _FALSE_VALUES:
+        logger.warning("%s=%r is not a boolean; treating it as off", name, raw)
+    return False
+
+
 AWS_REGION = resolve_aws_region()
 
 # An event-stream read timeout is the maximum idle period between Bedrock response
