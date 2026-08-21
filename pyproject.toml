@@ -29,13 +29,31 @@ infra = [
     "aws-cdk-lib==2.261.0",
     "constructs==10.6.0",
     "cdk-nag==2.38.2",
-    "pip>=26.1.2,<27.0",
+    # Floor is a security floor, not a feature floor: pip <26.2 is CVE-2026-13346.
+    "pip>=26.2,<27.0",
 ]
 demo = [
     "streamlit==1.54.0",
     "markupsafe==3.0.3",
     "pillow==12.3.0",
     "python-dotenv==1.2.2",
+]
+
+[tool.uv]
+# Security floors for transitive dependencies. These packages are not imported by
+# this project; they arrive via other dependencies that carry no upper bound, so a
+# constraint is the correct lever — it raises the resolved version without declaring
+# a first-party dependency we do not use. Keep an advisory reference per entry so the
+# floor can be retired once the direct dependency's own pin clears it.
+constraint-dependencies = [
+    # cryptography <50.0.0 (via authlib, pyjwt, secretstorage): GHSA-g6cj-pr64-35w5.
+    # Reaches the deployed AgentCore runtime through infra/runtime-requirements.txt.
+    "cryptography>=50.0.0",
+    # gitpython <=3.1.57 (via streamlit, demo extra only): GHSA-wvpp-8hx9-p66j,
+    # GHSA-jm78-9fvv-mhgr, GHSA-hmq2-w58f-27jc, GHSA-9rj7-rf2p-w77r,
+    # GHSA-4gmw-gg2m-w46p, GHSA-hh9p-6wh2-4mfc, plus GHSA-3f7w-8rr8-f37f,
+    # GHSA-539m-9xh6-q6rr, GHSA-p538-c434-8v24 fixed in earlier 3.1.5x releases.
+    "gitpython>=3.1.59",
 ]
 
 [tool.hatch.build.targets.wheel]
