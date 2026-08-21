@@ -71,6 +71,7 @@ Deploy once, then test both orchestration patterns through the same endpoint. Di
 │       │   └── tool_budget.py             # Per-agent tool-call budgets
 │       └── schemas/
 │           ├── models.py                  # Pydantic inter-agent data contracts
+│           ├── openapi.yaml               # Reference spec for the tool HTTP surface (not loaded)
 │           └── tool_schema.json           # Deployed Gateway tool contract (single source of truth)
 ├── tests/                                 # Test suite
 │   ├── conftest.py                        # Shared pytest fixtures

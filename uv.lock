@@ -1718,6 +1718,7 @@ demo = [
 dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
+    { name = "pyyaml" },
     { name = "ruff" },
 ]
 infra = [
@@ -1744,6 +1745,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = "==9.1.1" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = "==7.1.0" },
     { name = "python-dotenv", marker = "extra == 'demo'", specifier = "==1.2.2" },
+    { name = "pyyaml", marker = "extra == 'dev'", specifier = "==6.0.3" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.15.21" },
     { name = "strands-agents", specifier = "==1.48.0" },
     { name = "streamlit", marker = "extra == 'demo'", specifier = "==1.54.0" },

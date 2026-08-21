@@ -24,6 +24,9 @@ dev = [
     "pytest==9.1.1",
     "pytest-cov==7.1.0",
     "ruff==0.15.21",
+    # Imported directly by tests/test_schemas.py. Declared rather than relied on as a
+    # transitive of the runtime dependencies, so the tests keep working if those drop it.
+    "pyyaml==6.0.3",
 ]
 infra = [
     "aws-cdk-lib==2.261.0",

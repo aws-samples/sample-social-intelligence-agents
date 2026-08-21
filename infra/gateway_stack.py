@@ -10,6 +10,9 @@ Swap or add data sources here:
     3. Add the tool definition to `src/social_intelligence/schemas/tool_schema.json`
     4. Add the schema-to-route mapping only when its name differs from the route key
     5. Add the schema name to the responsible agent's allow-list in `entrypoint.py`
+    6. Mirror the tool in `src/social_intelligence/schemas/openapi.yaml`, which documents
+       the same surface but is not loaded at build or run time (`tests/test_schemas.py`
+       fails if the two drift)
 
 The Gateway uses IAM inbound auth (SigV4); the agent discovers tools over MCP.
 """
