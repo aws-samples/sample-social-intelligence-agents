@@ -11,7 +11,8 @@ add CAN-SPAM compliance elements (unsubscribe link, physical address).
 
 Compliance footer: set COMPLIANCE_FOOTER_REQUIRED=true to append an unsubscribe
 link and physical address to every rendered email (CAN-SPAM / CASL compliance).
-Default is off to preserve exact blog behavior.
+Default is off to preserve exact blog behavior. Set UNSUBSCRIBE_URL alongside it,
+or the footer renders the placeholder link below.
 """
 
 import json
@@ -20,6 +21,8 @@ import os
 from datetime import datetime, timezone
 
 from strands import tool
+
+from social_intelligence.config import bool_env
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +200,7 @@ def render_email_html(
         score_color = "#e53e3e"  # red
 
     template = _cached_template
-    compliance_footer = bool(os.environ.get("COMPLIANCE_FOOTER_REQUIRED", ""))
+    compliance_footer = bool_env("COMPLIANCE_FOOTER_REQUIRED")
     unsubscribe_url = os.environ.get("UNSUBSCRIBE_URL", "https://example.com/unsubscribe")
 
     html = template.render(

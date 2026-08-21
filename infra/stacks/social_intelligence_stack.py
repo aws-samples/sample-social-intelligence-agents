@@ -87,7 +87,14 @@ RUNTIME_ENV_VARS = (
     "ORCHESTRATION_NODE_TIMEOUT_SECONDS",
     "SEARCH_MAX_TOKENS",
     "TREND_MAX_TOKENS",
+    # The compliance footer renders this link, so it has to be settable wherever the
+    # COMPLIANCE_FOOTER_REQUIRED toggle above is; otherwise enabling the footer ships
+    # the placeholder unsubscribe URL from email_renderer.py.
+    "UNSUBSCRIBE_URL",
 )
+# Tool-side tuning read inside the Lambda bundle (tools/_secrets.py). Forwarded only when
+# set at deploy time, so the Lambda keeps its in-code defaults otherwise.
+LAMBDA_ENV_VARS = ("SECRET_CACHE_TTL_SECONDS",)
 
 
 def _leads_gsi_count() -> int:
@@ -349,6 +356,7 @@ class SocialIntelligenceStack(Stack):
                 removal_policy=removal,
             ),
             # Lambda runtime sets AWS_REGION automatically — no need to set it
+            environment={name: os.environ[name] for name in LAMBDA_ENV_VARS if os.environ.get(name)},
         )
 
         # Secrets Manager access — least-privilege grant_read per secret. This scopes

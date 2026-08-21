@@ -20,7 +20,13 @@ from botocore.exceptions import ClientError
 from pydantic import ValidationError
 from strands import tool
 
-from social_intelligence.config import AWS_REGION, EMAIL_SCORE_THRESHOLD, MAX_LEADS_PER_RUN, MIN_INDEPENDENT_SOURCES
+from social_intelligence.config import (
+    AWS_REGION,
+    EMAIL_SCORE_THRESHOLD,
+    MAX_LEADS_PER_RUN,
+    MIN_INDEPENDENT_SOURCES,
+    bool_env,
+)
 from social_intelligence.orchestration.qualification_gate import EmailQualification, assess_email_eligibility
 from social_intelligence.schemas.models import PersistedScore, ScorePersistenceRequest
 from social_intelligence.tools.grounding_gate import verify_email_claims
@@ -686,7 +692,7 @@ def store_lead(
         # Human-in-the-loop gate: when EMAIL_APPROVAL_REQUIRED is enabled, persist leads
         # as 'pending_review' so a human approves outreach before any email is sent.
         # Default ('new') matches the frozen-blog behavior when the flag is unset.
-        approval_required = os.environ.get("EMAIL_APPROVAL_REQUIRED", "").strip().lower() in ("true", "1", "yes")
+        approval_required = bool_env("EMAIL_APPROVAL_REQUIRED")
         lead_status = "pending_review" if approval_required else "new"
 
         now = datetime.now(timezone.utc)
