@@ -854,7 +854,10 @@ async def invoke(payload, context=None):  # noqa: ARG001 (context required by Ag
         background (bool): When true, start the run as an AgentCore async task and return
             immediately with the run_id. The runtime stays HealthyBusy until the pipeline
             finishes server-side; results are read back from DynamoDB by run_id. This
-            avoids the response-stream idle-disconnect on long multi-agent runs.
+            avoids the response-stream idle-disconnect on long multi-agent runs. It also
+            keeps a long run inside AgentCore's 100 MB request/response payload quota,
+            which is not adjustable: streaming every model delta of a multi-agent run can
+            exhaust that budget mid-pipeline, and the service then closes the response.
     """
     if not GATEWAY_URL:
         raise RuntimeError("GATEWAY_URL environment variable is required but not set")
