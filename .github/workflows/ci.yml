@@ -30,7 +30,7 @@ jobs:
       - name: Install dependencies
         run: |
           uv lock --check
-          uv sync --extra dev --locked
+          uv sync --extra dev --extra infra --locked
 
       - name: Verify runtime dependency export
         run: |
@@ -66,3 +66,18 @@ jobs:
 
       - name: Unit tests
         run: uv run python -m pytest tests/ -q --ignore=tests/integration
+
+      # Synthesizes the CDK app directly rather than through the cdk CLI, so CI needs no
+      # Node toolchain. The account and Region are placeholders: synth is env-agnostic here
+      # and no AWS credentials are used or required. CDK_OUTDIR is mandatory — an App with
+      # no explicit outdir synthesizes to a temporary directory when the cdk CLI is not
+      # driving it, and the gate would then find nothing to check.
+      - name: Synth infrastructure
+        env:
+          CDK_OUTDIR: cdk.out
+          CDK_DEFAULT_ACCOUNT: "123456789012"
+          AWS_REGION: us-east-1
+          JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION: "1"
+        run: |
+          uv run python infra/app.py
+          uv run python scripts/check_synth.py cdk.out

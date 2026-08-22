@@ -25,6 +25,7 @@ Contributions via pull requests are much appreciated. Before sending us a pull r
 1. You are working against the latest source on the *main* branch.
 2. You check existing open, and recently merged, pull requests to make sure someone else hasn't addressed the problem already.
 3. You open an issue to discuss any significant work - we would hate for your time to be wasted.
+4. The [local checks](#local-checks) below pass.
 
 To send us a pull request:
 
@@ -37,6 +38,45 @@ To send us a pull request:
 
 GitHub provides additional document on [forking a repository](https://help.github.com/articles/fork-a-repo/) and
 [creating a pull request](https://help.github.com/articles/creating-a-pull-request/).
+
+## Local Checks
+
+These are the same commands CI runs, in the same order. Run them from `code-samples/`:
+
+```bash
+uv sync --extra dev --extra infra --locked
+
+# Lint and formatting
+uv run ruff check src/ entrypoint.py scripts/ tests/ infra/app.py infra/gateway_stack.py \
+  infra/stacks/ infra/lambda/handler.py demo/config.py
+uv run ruff format --check src/ entrypoint.py scripts/ tests/ infra/app.py infra/gateway_stack.py \
+  infra/stacks/ infra/lambda/handler.py demo/config.py
+
+# Unit tests. Integration tests are excluded: they need live AWS credentials.
+uv run python -m pytest tests/ -q --ignore=tests/integration
+
+# Infrastructure. Synthesizing the app directly needs no Node toolchain and no AWS
+# credentials; the account and Region below are placeholders. Set CDK_OUTDIR: without the
+# cdk CLI driving it, the app synthesizes to a temporary directory.
+CDK_OUTDIR=cdk.out CDK_DEFAULT_ACCOUNT=123456789012 AWS_REGION=us-east-1 \
+  uv run python infra/app.py
+uv run python scripts/check_synth.py cdk.out
+```
+
+`scripts/check_synth.py` is the gate for the synthesized stack. `cdk synth` alone is not
+enough: it exits 0 even when cdk-nag reports an unsuppressed warning, and a cdk-nag pack
+that never ran looks identical to one that found nothing. The script instead asserts on
+positive evidence — a template with resources, a cdk-nag report with rows, and zero
+non-compliant rows among them. If you change `infra/`, expect this step to tell you when a
+suppression stops matching the resource it was written for.
+
+If you touch dependencies, regenerate the exported runtime requirements that CI diffs
+against, and commit both it and `uv.lock`:
+
+```bash
+uv export --frozen --format requirements-txt --no-dev --no-emit-project --no-hashes \
+  --no-header --no-annotate --output-file infra/runtime-requirements.txt
+```
 
 ## How to Add a New Tool
 
