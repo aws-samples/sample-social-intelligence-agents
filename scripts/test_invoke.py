@@ -1,4 +1,15 @@
-"""Quick test: invoke the deployed AgentCore Runtime with SSE streaming fix.
+"""Quick test: invoke the deployed AgentCore Runtime over the interactive SSE stream.
+
+This exercises the synchronous streaming path that interactive clients (such as the demo
+UI) use. It is a probe of that path, not a full end-to-end test: a multi-agent run forwards
+every model delta as an SSE event, so a long run can exhaust AgentCore's response payload
+budget and be cut off mid-pipeline. That is a property of the transport, not a failure of
+the pipeline, and the script says so when it happens.
+
+For an end-to-end run that completes, use background invocation, which persists results to
+DynamoDB instead of holding a stream open:
+
+    uv run python scripts/eval_quality.py --live --limit 1
 
 Usage:
     .venv/bin/python test_invoke.py [graph|swarm]
@@ -43,6 +54,15 @@ AGENT_ARN = os.environ.get(
 )
 REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
 PROFILE = os.environ.get("AWS_PROFILE", "default")
+
+# AgentCore Runtime caps a request/response payload at 100 MB, and the quota is documented
+# as not adjustable. Streaming every model delta of a multi-agent run reaches that ceiling
+# in minutes, at which point the service closes the response. Rerunning cannot help, so the
+# script distinguishes this from a transient stream error instead of advising a retry.
+RESPONSE_PAYLOAD_LIMIT_BYTES = 100 * 1000 * 1000
+
+# Emit a progress line every N parsed lines.
+PROGRESS_LINE_INTERVAL = 1000
 
 
 def main():
@@ -97,6 +117,7 @@ def main():
 
     bytes_read = 0
     line_count = 0
+    next_progress_at = PROGRESS_LINE_INTERVAL
     event_counts: dict[str, int] = {}
 
     # Robust drain for both SSE and raw streams: iterate raw byte chunks and split
@@ -145,28 +166,44 @@ def main():
         chunks = body.iter_chunks(chunk_size=4096) if hasattr(body, "iter_chunks") else body
         for chunk in chunks:
             raw = chunk.decode("utf-8", errors="replace") if isinstance(chunk, bytes) else str(chunk)
-            bytes_read += len(raw)
+            # Count wire bytes, not decoded characters, so the total is comparable to the
+            # service payload quota.
+            bytes_read += len(chunk) if isinstance(chunk, bytes) else len(raw)
             buffer += raw
             while "\n" in buffer:
                 line, buffer = buffer.split("\n", 1)
                 _handle_line(line)
-            if line_count and line_count % 1000 == 0:
+            # Report on crossing each interval. Testing `line_count % N == 0` would instead
+            # reprint for every chunk that parsed no new line while the count sat on N.
+            if line_count >= next_progress_at:
                 elapsed = time.time() - t0
                 print(f"  ... {line_count} lines, {bytes_read / 1024 / 1024:.1f} MB, {elapsed:.0f}s")
+                next_progress_at = line_count + PROGRESS_LINE_INTERVAL
         # Flush any trailing line not terminated by a newline.
         if buffer.strip():
             _handle_line(buffer)
     except (ResponseStreamingError, ProtocolError, IncompleteRead) as e:
-        # The AgentCore app cancels its producer when the response consumer disconnects.
-        # A partial stream is not a successful invocation and must be retried.
+        # The AgentCore app cancels its producer once the response consumer goes away, so a
+        # partial stream means the pipeline stopped mid-run. Whether that is worth retrying
+        # depends on why the stream ended, which is reported below.
         disconnected = True
         if buffer.strip():
             _handle_line(buffer)
-        print(f"\n[client disconnect after {time.time() - t0:.0f}s - invocation cancelled] {type(e).__name__}")
+        print(f"\n[stream ended after {time.time() - t0:.0f}s - invocation cancelled] {type(e).__name__}")
     except Exception as e:
         print(f"\nStream error: {type(e).__name__}: {e}")
     if disconnected:
-        print("NOTE: partial output is invalid. Rerun the invocation after resolving the stream error.")
+        print("NOTE: partial output is invalid — the pipeline did not reach a terminal result.")
+        if bytes_read >= RESPONSE_PAYLOAD_LIMIT_BYTES:
+            print(
+                f"CAUSE: this response reached AgentCore's 100 MB payload quota "
+                f"({bytes_read:,} bytes). The quota is not adjustable, so retrying this "
+                f"pattern over SSE will fail the same way."
+            )
+            print('FIX:   invoke with {"background": true} and read results from DynamoDB by run_id, or run')
+            print("       uv run python scripts/eval_quality.py --live --limit 1")
+        else:
+            print("Retry the invocation; the stream ended well below the 100 MB payload quota.")
 
     elapsed = time.time() - t0
     print()
