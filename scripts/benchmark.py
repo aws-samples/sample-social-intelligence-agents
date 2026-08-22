@@ -34,6 +34,7 @@ from typing import Any
 import bedrock_agentcore  # noqa: F401 - registers the AgentCore botocore service model
 import boto3
 from bedrock_agentcore.evaluation import fetch_spans_from_cloudwatch
+from boto3.dynamodb.conditions import Key
 from botocore.config import Config
 
 REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
@@ -373,8 +374,6 @@ def write_csv(results: dict[str, PatternResult], path: Path) -> None:
 
 def _email_leads_for_session(table: Any, session_id: str) -> list[dict[str, Any]]:
     """Return full email-lead records associated with one benchmark session."""
-    from boto3.dynamodb.conditions import Key
-
     records: list[dict[str, Any]] = []
     query_kwargs: dict[str, Any] = {
         "IndexName": "session-id-discovered-at-index",

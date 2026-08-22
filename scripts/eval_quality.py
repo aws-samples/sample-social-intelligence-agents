@@ -4,13 +4,13 @@ Two modes:
   --offline  Validates golden_set.json structure and runs the grounding_gate
              structured fallback against synthetic email/evidence pairs.
              No AWS credentials required.
-  --live     Starts each golden prompt as an AgentCore background run (survives the
-             response-stream idle window), waits for a successful terminal marker, then
-             reads results from DynamoDB by run_id:
+  --live     Starts each golden prompt as an AgentCore background run, waits for a
+             successful terminal marker, then reads results from DynamoDB by run_id:
              scored_prospect prompts read persisted analysis scores; email_draft prompts
              read persisted drafts and score them with an LLM-as-judge on relevance and
              on grounding against the lead's recorded evidence. Requires AWS credentials
-             and AGENTCORE_AGENT_ARN.
+             and AGENTCORE_AGENT_ARN. Background is the only path a full run completes on;
+             an SSE stream exhausts AgentCore's 100 MB payload quota mid-pipeline.
 
 Usage:
   uv run python scripts/eval_quality.py --offline
@@ -18,6 +18,10 @@ Usage:
   uv run python scripts/eval_quality.py --live --limit 1
 
 Output: a plain-text summary table printed to stdout.
+
+boto3/botocore are imported inside the functions that use them rather than at module
+scope, so --offline and --help do not pay the AWS SDK import cost; neither package is
+pulled in transitively by this module's top-level imports.
 """
 
 from __future__ import annotations
@@ -347,8 +351,10 @@ def _start_background_run(arn: str, prompt: str, region: str, run_id: str, patte
 
     The runtime executes long multi-agent runs in a background thread (staying
     HealthyBusy) and persists all results to DynamoDB, so this call returns quickly with
-    an ``async_started`` acknowledgment rather than holding a minutes-long SSE stream that
-    would idle-disconnect. Results are read back from DynamoDB by run_id afterward.
+    an ``async_started`` acknowledgment rather than holding a minutes-long SSE stream. A
+    stream cannot carry a full run: forwarding every model delta exhausts AgentCore's
+    100 MB payload quota and the service closes the response, cancelling the pipeline.
+    Results are read back from DynamoDB by run_id afterward.
 
     run_id is passed as the payload ``run_id`` (not ``session_id``) on purpose: it drives
     lead attribution WITHOUT enabling AgentCore Memory, which keys off session_id and
