@@ -853,11 +853,12 @@ async def invoke(payload, context=None):  # noqa: ARG001 (context required by Ag
         include_scored_prospects (bool): Emit typed analysis scores for evaluation clients
         background (bool): When true, start the run as an AgentCore async task and return
             immediately with the run_id. The runtime stays HealthyBusy until the pipeline
-            finishes server-side; results are read back from DynamoDB by run_id. This
-            avoids the response-stream idle-disconnect on long multi-agent runs. It also
-            keeps a long run inside AgentCore's 100 MB request/response payload quota,
-            which is not adjustable: streaming every model delta of a multi-agent run can
-            exhaust that budget mid-pipeline, and the service then closes the response.
+            finishes server-side; results are read back from DynamoDB by run_id. This is
+            the only path on which a long multi-agent run completes. Streaming forwards
+            every model delta as an SSE event, which exhausts AgentCore's 100 MB
+            request/response payload quota within minutes (measured: cut off at 100 MiB
+            after ~185s); the service then closes the response, which cancels the
+            pipeline mid-run. That quota is documented as not adjustable.
     """
     if not GATEWAY_URL:
         raise RuntimeError("GATEWAY_URL environment variable is required but not set")
@@ -888,10 +889,12 @@ async def invoke(payload, context=None):  # noqa: ARG001 (context required by Ag
     session_manager = _build_session_manager(session_id, actor_id)
 
     if background:
-        # Long multi-agent runs outlive the response stream's idle window. Track the run
-        # as an AgentCore async task (keeps the session HealthyBusy, not idle-killed) and
-        # drive it in a detached thread. copy_context() carries the run-scoped ContextVars
-        # into that thread; results are persisted to DynamoDB and read back by run_id.
+        # A long multi-agent run cannot finish over the response stream: forwarding every
+        # model delta exhausts the 100 MB payload quota and the service closes the
+        # response, cancelling the run. Track it as an AgentCore async task instead, which
+        # also keeps the session HealthyBusy rather than idle-terminated, and drive it in a
+        # detached thread. copy_context() carries the run-scoped ContextVars into that
+        # thread; results are persisted to DynamoDB and read back by run_id.
         task_id = app.add_async_task("pipeline_run", {"run_id": run_id, "pattern": pattern})
         context_snapshot = contextvars.copy_context()
         threading.Thread(

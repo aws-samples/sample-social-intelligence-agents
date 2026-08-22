@@ -137,7 +137,7 @@ def main():
         data = line[6:] if line.startswith("data: ") else line
         try:
             parsed = json.loads(data)
-        except json.JSONDecodeError, TypeError:
+        except json.JSONDecodeError:
             return
         if not isinstance(parsed, dict):
             return
