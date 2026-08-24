@@ -3,9 +3,9 @@ annotated-types==0.8.0
 anyio==4.14.2
 attrs==26.1.0
 authlib==1.7.2
-awscrt==0.36.0
+awscrt==0.36.2
 beartype==0.22.9
-bedrock-agentcore==1.18.1
+bedrock-agentcore==1.22.0
 boto3==1.43.78
 botocore==1.43.78
 cachetools==6.2.6
@@ -58,13 +58,13 @@ platformdirs==4.11.3
 py-key-value-aio==0.4.5
 pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
 pydantic==2.13.4
-pydantic-core==2.46.4
+pydantic-core==2.48.0
 pydantic-settings==2.15.0
 pygments==2.21.0
 pyjwt==2.13.0
 pyperclip==1.11.0
 python-dateutil==2.9.0.post0
-python-dotenv==1.2.2
+python-dotenv==1.2.3
 python-multipart==0.0.32
 pywin32==312 ; sys_platform == 'win32'
 pywin32-ctypes==0.2.3 ; sys_platform == 'win32'
@@ -78,7 +78,7 @@ secretstorage==3.5.0 ; sys_platform == 'linux'
 six==1.17.0
 sse-starlette==3.4.8
 starlette==1.6.0
-strands-agents==1.48.0
+strands-agents==1.52.0
 typing-extensions==4.16.0
 typing-inspection==0.4.4
 uncalled-for==0.4.0
