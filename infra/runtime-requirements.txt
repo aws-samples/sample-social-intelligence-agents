@@ -2,7 +2,7 @@ aiofile==3.12.3
 annotated-types==0.8.0
 anyio==4.14.2
 attrs==26.1.0
-authlib==1.7.2
+authlib==1.9.1
 awscrt==0.36.0
 beartype==0.22.9
 bedrock-agentcore==1.18.1
